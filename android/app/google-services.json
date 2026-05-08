@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "1047925796647",
+    "project_id": "ustaad-ai-app",
+    "storage_bucket": "ustaad-ai-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1047925796647:android:307789d65d1d6532864302",
+        "android_client_info": {
+          "package_name": "com.example.ustaad"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1047925796647-88k5nui6gpef4j5qnu45aifhk09p2vi6.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.ustaad",
+            "certificate_hash": "faa6906e5e826ac08aaf6b23391c4c510eb4efae"
+          }
+        },
+        {
+          "client_id": "1047925796647-o8drev13ntvt8f3r0d93koq11fg2a1f8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAGHqOVo_CuSYqMrStrig9XVfKRN2HHpLA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1047925796647-o8drev13ntvt8f3r0d93koq11fg2a1f8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1047925796647-o3j947ocicr9cft6ljl5ola87rbrr7ko.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.ustaad"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
