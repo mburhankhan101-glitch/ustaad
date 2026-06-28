@@ -1,7 +1,4 @@
 // lib/providers/paper_provider.dart
-//
-// Uses your existing FirestoreService.fetchQuestions() — no changes needed
-// to your firestore_service.dart. This provider manages the full exam session.
 
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,12 +6,11 @@ import '../models/question_model.dart';
 import '../models/paper_model.dart';
 import '../services/firestore_service.dart';
 
-// Re-use your existing service (if you already have a provider for it, use that)
 final _firestoreServiceProvider = Provider<FirestoreService>(
   (_) => FirestoreService(),
 );
 
-// ─── Loaded section: config + its questions ───────────────────────────────────
+// ─── Loaded section ───────────────────────────────────────────────────────────
 
 class LoadedSection {
   final SectionConfig config;
@@ -23,20 +19,18 @@ class LoadedSection {
   const LoadedSection({required this.config, required this.questions});
 }
 
-// ─── Full session state ───────────────────────────────────────────────────────
+// ─── Session state ────────────────────────────────────────────────────────────
 
 class PaperSessionState {
   final ExamType examType;
-  final List<LoadedSection> sections; // randomised order for FAST
-  final Map<String, QuestionAnswer> answers; // key: question.id
+  final List<LoadedSection> sections;
+  final Map<String, QuestionAnswer> answers;
   final int currentSectionIndex;
   final int currentQuestionIndex;
   final bool isSubmitted;
 
-  // FAST & NTS: per-section seconds remaining
-  // NUST: only globalSecondsLeft is used
   final int globalSecondsLeft;
-  final Map<String, int> sectionSecondsLeft; // key: SectionConfig.id
+  final Map<String, int> sectionSecondsLeft;
 
   const PaperSessionState({
     required this.examType,
@@ -59,7 +53,6 @@ class PaperSessionState {
   bool get isCurrentConfirmed =>
       answers[currentQuestion.id]?.isConfirmed == true;
 
-  // How many questions answered in a given section (for NUST tab badge)
   int answeredInSection(int sectionIdx) {
     final qs = sections[sectionIdx].questions;
     return qs.where((q) => answers[q.id]?.selectedIndex != null).length;
@@ -92,70 +85,96 @@ class PaperSessionNotifier
     extends StateNotifier<AsyncValue<PaperSessionState?>> {
   final FirestoreService _service;
   Timer? _timer;
-
-  PaperResult? _lastResult; // cached so ref.listen can read it after submit
+  PaperResult? _lastResult;
 
   PaperSessionNotifier(this._service) : super(const AsyncValue.data(null));
 
   // ── Start a paper ─────────────────────────────────────────────────────────
-  // Fetches all sections from Firestore using your existing fetchQuestions(),
-  // then builds the session.
 
-  Future<void> startPaper(ExamType examType) async {
+  Future<void> startPaper(ExamType examType, {required String uid}) async {
     state = const AsyncValue.loading();
 
     try {
       final configs = PaperConfigs.forExamType(examType);
+      final sessionExcludeIds = <String>{};
+      final loadedSections = <LoadedSection>[];
 
-      // IMPORTANT: .toList() converts the lazy Iterable to a real List
-      // before passing to Future.wait — without this the shuffle crashes
-      // with RangeError because the result is a fixed-length list.
-      final futures = configs.map((cfg) async {
-        final questions = await _service.fetchQuestions(
-          exam: cfg.firestoreExam,
-          section: cfg.firestoreSection,
-          limit: cfg.totalQuestions,
-        );
-        return LoadedSection(config: cfg, questions: questions);
-      }).toList(); // ← critical .toList() here
+      for (final cfg in configs) {
+        List<Question> questions;
 
-      // Collect results into a growable list so shuffle works
-      final loadedSections = List<LoadedSection>.from(
-        await Future.wait(futures),
-      );
+        if (cfg.subSections != null && cfg.subSections!.isNotEmpty) {
+          // Composite section — fetch each sub‑source with its exact count
+          final allQuestions = <Question>[];
+          for (final source in cfg.subSections!) {
+            final batch = await _service.fetchQuestions(
+              exam: source.firestoreExam,
+              section: source.firestoreSection,
+              additionalSection: source.additionalSection,
+              limit: source.count,
+              uid: uid,
+              sessionExcludeIds: sessionExcludeIds,
+            );
+            print(
+              '   📦 Composite fetch: ${source.firestoreSection} '
+              '→ got ${batch.length} / ${source.count}',
+            );
+            sessionExcludeIds.addAll(batch.map((q) => q.id));
+            allQuestions.addAll(batch);
+          }
 
-      // Drop sections that have 0 questions (not uploaded yet).
-      // Lets you test with partial data without crashing the whole paper.
-      loadedSections.removeWhere((ls) {
-        if (ls.questions.isEmpty) {
-          print(
-            'USTAAD WARNING: Section "\${ls.config.label}" skipped '
-            '(0 questions in Firestore). Upload them and restart.',
+          // Validate that we got enough questions
+          final totalFetched = allQuestions.length;
+          if (totalFetched < cfg.totalQuestions) {
+            throw Exception(
+              'Not enough questions for "${cfg.label}". '
+              'Check your Firestore data and sub‑sections mapping.\n'
+              'Expected: ${cfg.totalQuestions}, got: $totalFetched',
+            );
+          }
+
+          allQuestions.shuffle();
+          questions = allQuestions;
+        } else {
+          // Simple single‑source section
+          questions = await _service.fetchQuestions(
+            exam: cfg.firestoreExam,
+            section: cfg.firestoreSection,
+            additionalSection: cfg.additionalSection,
+            limit: cfg.totalQuestions,
+            uid: uid,
+            sessionExcludeIds: sessionExcludeIds,
           );
-          return true;
+          sessionExcludeIds.addAll(questions.map((q) => q.id));
         }
-        return false;
-      });
 
-      // Fail only if every section is empty
+        if (questions.isEmpty) {
+          print(
+            'USTAAD WARNING: Section "${cfg.label}" skipped '
+            '(0 questions in Firestore).',
+          );
+          continue;
+        }
+
+        loadedSections.add(LoadedSection(config: cfg, questions: questions));
+      }
+
       if (loadedSections.isEmpty) {
         state = AsyncValue.error(
           'No questions found in Firestore.\n\n'
           'Check:\n'
-          '1. "exam" and "section" field values match exactly (case-sensitive).\n'
+          '1. "exam" and "section" field values match exactly.\n'
           '2. Composite index on exam + section exists in Firebase Console.\n'
-          '3. Firestore security rules allow reads for logged-in users.',
+          '3. Firestore security rules allow reads.',
           StackTrace.current,
         );
         return;
       }
 
-      // FAST: randomise section order. NUST and NTS keep fixed order.
+      // FAST: randomise section order
       if (examType == ExamType.fastNU) {
-        loadedSections.shuffle(); // safe - growable List.from() above
+        loadedSections.shuffle();
       }
 
-      // Build per-section timer map (seconds)
       final sectionSeconds = {
         for (final s in loadedSections) s.config.id: s.config.totalMinutes * 60,
       };
@@ -184,17 +203,13 @@ class PaperSessionNotifier
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       final current = state.value;
-      // Guard: don't tick if session not ready or already done
       if (current == null || current.isSubmitted) {
         _timer?.cancel();
         return;
       }
-      // Guard: don't tick if sections are somehow empty
       if (current.sections.isEmpty) return;
 
       if (type == ExamType.nustNET || type == ExamType.nts) {
-        // NTS and NUST both use a single global countdown timer.
-        // NTS sections have totalMinutes=0 so per-section timer must NOT be used.
         final rem = current.globalSecondsLeft - 1;
         if (rem <= 0) {
           submitPaper();
@@ -202,15 +217,12 @@ class PaperSessionNotifier
         }
         state = AsyncValue.data(current.copyWith(globalSecondsLeft: rem));
       } else {
-        // FAST only — per-section timer
         final sectionId = current.currentSection.config.id;
         final rem = (current.sectionSecondsLeft[sectionId] ?? 0) - 1;
-
         if (rem <= 0) {
           _autoAdvanceOrSubmit(current);
           return;
         }
-
         final updated = Map<String, int>.from(current.sectionSecondsLeft);
         updated[sectionId] = rem;
         state = AsyncValue.data(current.copyWith(sectionSecondsLeft: updated));
@@ -234,22 +246,16 @@ class PaperSessionNotifier
   void selectOption(int optionIndex) {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
-
     final qId = current.currentQuestion.id;
-
-    // FAST: locked after confirm
     if (current.answers[qId]?.isConfirmed == true) return;
-
     final updated = Map<String, QuestionAnswer>.from(current.answers);
     updated[qId] = QuestionAnswer(questionId: qId, selectedIndex: optionIndex);
     state = AsyncValue.data(current.copyWith(answers: updated));
   }
 
-  // NTS only — answer a specific question by ID (3 on one page at once)
   void selectOptionById(String questionId, int optionIndex) {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
-
     final updated = Map<String, QuestionAnswer>.from(current.answers);
     updated[questionId] = QuestionAnswer(
       questionId: questionId,
@@ -258,15 +264,12 @@ class PaperSessionNotifier
     state = AsyncValue.data(current.copyWith(answers: updated));
   }
 
-  // FAST only — locks the answer permanently
   void confirmAnswer() {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
-
     final qId = current.currentQuestion.id;
     final existing = current.answers[qId];
-    if (existing?.selectedIndex == null) return; // nothing selected
-
+    if (existing?.selectedIndex == null) return;
     final updated = Map<String, QuestionAnswer>.from(current.answers);
     updated[qId] = existing!.copyWith(isConfirmed: true);
     state = AsyncValue.data(current.copyWith(answers: updated));
@@ -299,12 +302,10 @@ class PaperSessionNotifier
     }
   }
 
-  // NUST only — free switching between sections
   void switchToSection(int sectionIndex) {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
     if (current.examType != ExamType.nustNET) return;
-
     state = AsyncValue.data(
       current.copyWith(
         currentSectionIndex: sectionIndex,
@@ -313,11 +314,9 @@ class PaperSessionNotifier
     );
   }
 
-  // FAST only — one-way section advance, cannot go back
   void advanceToNextSection() {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
-
     final next = current.currentSectionIndex + 1;
     if (next < current.sections.length) {
       state = AsyncValue.data(
@@ -328,7 +327,6 @@ class PaperSessionNotifier
     }
   }
 
-  // NTS booklet: jump to a specific page within current section
   void jumpToPage(int pageIndex, int questionsPerPage) {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
@@ -362,7 +360,7 @@ class PaperSessionNotifier
           earned += ls.config.markCorrect;
         } else {
           wrong++;
-          penalty += ls.config.markWrong; // already ≤ 0
+          penalty += ls.config.markWrong;
         }
       }
 
@@ -389,8 +387,6 @@ class PaperSessionNotifier
     return _lastResult!;
   }
 
-  // Returns the last computed result — used by ref.listen navigation
-  // so the screen can navigate to PaperResultScreen after timer auto-submit.
   PaperResult? buildResult() => _lastResult;
 
   void reset() {

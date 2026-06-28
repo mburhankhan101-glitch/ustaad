@@ -1,5 +1,7 @@
 // lib/screens/papers/fast_paper_screen.dart
+// Style C: Centered exam content on web, clean navbar, global light scrollbar.
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/providers/paper_provder.dart';
@@ -18,16 +20,22 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
   @override
   void initState() {
     super.initState();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(paperSessionProvider.notifier).startPaper(widget.examType);
+      ref
+          .read(paperSessionProvider.notifier)
+          .startPaper(
+            widget.examType,
+            uid: FirebaseAuth.instance.currentUser!.uid,
+          );
     });
   }
 
-  // ── Quit confirmation dialog ─────────────────────────────────────────────────
+  // ── Quit confirmation dialog ────────────────────────────────────────────
   void _showQuitDialog(BuildContext context) {
     showDialog(
       context: context,
-      barrierDismissible: false, // must tap a button — no accidental dismissal
+      barrierDismissible: false,
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF1A1464),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -50,8 +58,7 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context), // close dialog, stay in paper
+            onPressed: () => Navigator.pop(context),
             child: const Text(
               'Cancel',
               style: TextStyle(
@@ -63,8 +70,8 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
           ),
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // close dialog
-              Navigator.pop(context); // leave the paper screen
+              Navigator.pop(context);
+              Navigator.pop(context);
             },
             child: const Text(
               'Quit',
@@ -82,45 +89,128 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isWeb = MediaQuery.of(context).size.width > 600;
     final sessionAsync = ref.watch(paperSessionProvider);
 
-    // PopScope intercepts the Android back button AND the swipe-back gesture.
-    // canPop: false means Flutter will never pop automatically — we decide.
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return; // already handled, nothing to do
+        if (didPop) return;
         _showQuitDialog(context);
       },
       child: Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF0A0E2E), Color(0xFF1A1464), Color(0xFF2A1E80)],
+        backgroundColor: const Color(0xFF0A0E2E),
+        body: Column(
+          children: [
+            if (isWeb) _buildWebNavBar(context),
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF0A0E2E),
+                      Color(0xFF1A1464),
+                      Color(0xFF2A1E80),
+                    ],
+                  ),
+                ),
+                child: isWeb
+                    ? Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 900),
+                          child: sessionAsync.when(
+                            loading: () =>
+                                const _LoadingView(message: 'Loading paper...'),
+                            error: (e, _) => _ErrorView(error: e.toString()),
+                            data: (session) {
+                              if (session == null)
+                                return const _LoadingView(
+                                  message: 'Preparing...',
+                                );
+                              if (session.isSubmitted)
+                                return const SizedBox.shrink();
+                              return _FastExamBody(session: session);
+                            },
+                          ),
+                        ),
+                      )
+                    : SafeArea(
+                        child: sessionAsync.when(
+                          loading: () =>
+                              const _LoadingView(message: 'Loading paper...'),
+                          error: (e, _) => _ErrorView(error: e.toString()),
+                          data: (session) {
+                            if (session == null)
+                              return const _LoadingView(
+                                message: 'Preparing...',
+                              );
+                            if (session.isSubmitted)
+                              return const SizedBox.shrink();
+                            return _FastExamBody(session: session);
+                          },
+                        ),
+                      ),
+              ),
             ),
-          ),
-          child: SafeArea(
-            child: sessionAsync.when(
-              loading: () => const _LoadingView(message: 'Loading paper...'),
-              error: (e, _) => _ErrorView(error: e.toString()),
-              data: (session) {
-                if (session == null)
-                  return const _LoadingView(message: 'Preparing...');
-                if (session.isSubmitted) return const SizedBox.shrink();
-                return _FastExamBody(session: session);
-              },
-            ),
-          ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildWebNavBar(BuildContext context) {
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        border: Border(
+          bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Text(
+            'FAST-NU Paper',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => _showQuitDialog(context),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6B6B).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: const Color(0xFFFF6B6B).withOpacity(0.3),
+                ),
+              ),
+              child: const Text(
+                'Quit',
+                style: TextStyle(
+                  color: Color(0xFFFF6B6B),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-// ─── Main exam body ───────────────────────────────────────────────────────────
-
+// ─── Exam body (global scrollbar handles it) ────────────────────────────────
 class _FastExamBody extends ConsumerWidget {
   final PaperSessionState session;
   const _FastExamBody({required this.session});
@@ -134,14 +224,12 @@ class _FastExamBody extends ConsumerWidget {
     final sections = session.sections;
     final secIdx = session.currentSectionIndex;
 
-    // Per-section seconds left
     final secLeft = session.sectionSecondsLeft[section.config.id] ?? 0;
     final mins = (secLeft ~/ 60).toString().padLeft(2, '0');
     final secs = (secLeft % 60).toString().padLeft(2, '0');
 
     return Column(
       children: [
-        // ── Top bar: section pill + timer ──────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
           child: Row(
@@ -152,19 +240,13 @@ class _FastExamBody extends ConsumerWidget {
             ],
           ),
         ),
-
         const SizedBox(height: 10),
-
-        // ── Section progress dots with labels ──────────────────────────────
         _SectionDots(
           sections: sections,
           currentIndex: secIdx,
           session: session,
         ),
-
         const SizedBox(height: 10),
-
-        // ── Question progress bar ──────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18),
           child: Column(
@@ -203,8 +285,6 @@ class _FastExamBody extends ConsumerWidget {
             ],
           ),
         ),
-
-        // ── Marking chips ──────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
           child: Row(
@@ -223,176 +303,13 @@ class _FastExamBody extends ConsumerWidget {
             ],
           ),
         ),
-
         const SizedBox(height: 10),
-
-        // ── Question card ──────────────────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.07),
-                    border: Border.all(color: Colors.white.withOpacity(0.12)),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Question ${qIndex + 1} · ${section.config.label}',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.35),
-                          fontSize: 10,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        question.text,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          height: 1.5,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-
-                      // Options
-                      ...List.generate(question.options.length, (i) {
-                        final isSelected = answer?.selectedIndex == i;
-                        final isConfirmed = answer?.isConfirmed == true;
-
-                        Color borderColor = Colors.white.withOpacity(0.1);
-                        Color bgColor = Colors.white.withOpacity(0.05);
-                        Color letterBg = Colors.white.withOpacity(0.08);
-                        Color letterTxt = Colors.white.withOpacity(0.5);
-
-                        if (isSelected && isConfirmed) {
-                          bgColor = const Color(0xFF4CAF50).withOpacity(0.15);
-                          borderColor = const Color(
-                            0xFF4CAF50,
-                          ).withOpacity(0.5);
-                          letterBg = const Color(0xFF4CAF50);
-                          letterTxt = Colors.white;
-                        } else if (isSelected) {
-                          bgColor = const Color(0xFF6C63FF).withOpacity(0.2);
-                          borderColor = const Color(
-                            0xFF6C63FF,
-                          ).withOpacity(0.6);
-                          letterBg = const Color(0xFF6C63FF);
-                          letterTxt = Colors.white;
-                        }
-
-                        return GestureDetector(
-                          onTap: isConfirmed
-                              ? null
-                              : () => ref
-                                    .read(paperSessionProvider.notifier)
-                                    .selectOption(i),
-                          child: Opacity(
-                            opacity: (isConfirmed && !isSelected) ? 0.4 : 1.0,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 11,
-                              ),
-                              decoration: BoxDecoration(
-                                color: bgColor,
-                                border: Border.all(color: borderColor),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                children: [
-                                  Container(
-                                    width: 24,
-                                    height: 24,
-                                    decoration: BoxDecoration(
-                                      color: letterBg,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      isSelected && isConfirmed
-                                          ? '✓'
-                                          : String.fromCharCode(65 + i),
-                                      style: TextStyle(
-                                        color: letterTxt,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        fontFamily: 'Poppins',
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      question.options[i],
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontFamily: 'Poppins',
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-
-                      // Confirmed lock notice
-                      if (answer?.isConfirmed == true) ...[
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 9,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF4CAF50).withOpacity(0.1),
-                            border: Border.all(
-                              color: const Color(0xFF4CAF50).withOpacity(0.25),
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.lock,
-                                color: Color(0xFF4CAF50),
-                                size: 14,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Answer locked — cannot be changed',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
-                                  fontSize: 10,
-                                  fontFamily: 'Poppins',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
+            child: _questionCardWidget(ref, question, answer, section, qIndex),
           ),
         ),
-
-        // ── Bottom nav: prev | confirm | next ──────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
           child: Row(
@@ -422,15 +339,156 @@ class _FastExamBody extends ConsumerWidget {
             ],
           ),
         ),
-
-        // Next Section button
         _NextSectionButton(
           session: session,
           onTap: () => _onNextSection(context, ref, session),
         ),
-
         const SizedBox(height: 8),
       ],
+    );
+  }
+
+  Widget _questionCardWidget(
+    WidgetRef ref,
+    dynamic question,
+    dynamic answer,
+    LoadedSection section,
+    int qIndex,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.07),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Question ${qIndex + 1} · ${section.config.label}',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.35),
+              fontSize: 10,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            question.text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              height: 1.5,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...List.generate(question.options.length, (i) {
+            final isSelected = answer?.selectedIndex == i;
+            final isConfirmed = answer?.isConfirmed == true;
+            Color borderColor = Colors.white.withOpacity(0.1);
+            Color bgColor = Colors.white.withOpacity(0.05);
+            Color letterBg = Colors.white.withOpacity(0.08);
+            Color letterTxt = Colors.white.withOpacity(0.5);
+            if (isSelected && isConfirmed) {
+              bgColor = const Color(0xFF4CAF50).withOpacity(0.15);
+              borderColor = const Color(0xFF4CAF50).withOpacity(0.5);
+              letterBg = const Color(0xFF4CAF50);
+              letterTxt = Colors.white;
+            } else if (isSelected) {
+              bgColor = const Color(0xFF6C63FF).withOpacity(0.2);
+              borderColor = const Color(0xFF6C63FF).withOpacity(0.6);
+              letterBg = const Color(0xFF6C63FF);
+              letterTxt = Colors.white;
+            }
+            return GestureDetector(
+              onTap: isConfirmed
+                  ? null
+                  : () =>
+                        ref.read(paperSessionProvider.notifier).selectOption(i),
+              child: Opacity(
+                opacity: (isConfirmed && !isSelected) ? 0.4 : 1.0,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 11,
+                  ),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    border: Border.all(color: borderColor),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: letterBg,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          isSelected && isConfirmed
+                              ? '✓'
+                              : String.fromCharCode(65 + i),
+                          style: TextStyle(
+                            color: letterTxt,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'Poppins',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          question.options[i],
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontFamily: 'Poppins',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          if (answer?.isConfirmed == true) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xFF4CAF50).withOpacity(0.1),
+                border: Border.all(
+                  color: const Color(0xFF4CAF50).withOpacity(0.25),
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock, color: Color(0xFF4CAF50), size: 14),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Answer locked — cannot be changed',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 10,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -440,7 +498,6 @@ class _FastExamBody extends ConsumerWidget {
     PaperSessionState session,
   ) {
     final isLast = session.currentSectionIndex >= session.sections.length - 1;
-
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -503,12 +560,10 @@ class _FastExamBody extends ConsumerWidget {
   }
 }
 
-// ─── Reusable widgets ─────────────────────────────────────────────────────────
-
+// ─── Reusable widgets ────────────────────────────────────────────────────────
 class _SectionPill extends StatelessWidget {
   final String label;
   const _SectionPill({required this.label});
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -535,7 +590,6 @@ class _TimerBox extends StatelessWidget {
   final String time;
   final bool isUrgent;
   const _TimerBox({required this.time, required this.isUrgent});
-
   @override
   Widget build(BuildContext context) {
     final color = isUrgent ? const Color(0xFFFF6B6B) : Colors.white70;
@@ -575,13 +629,11 @@ class _SectionDots extends StatelessWidget {
   final List<LoadedSection> sections;
   final int currentIndex;
   final PaperSessionState session;
-
   const _SectionDots({
     required this.sections,
     required this.currentIndex,
     required this.session,
   });
-
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -590,12 +642,8 @@ class _SectionDots extends StatelessWidget {
         children: List.generate(sections.length, (i) {
           final isDone = i < currentIndex;
           final isActive = i == currentIndex;
-          final isUpcoming = i > currentIndex;
-
-          Color barColor;
-          Color labelColor;
+          Color barColor, labelColor;
           String subLabel;
-
           if (isDone) {
             barColor = const Color(0xFF4CAF50).withOpacity(0.6);
             labelColor = const Color(0xFF4CAF50).withOpacity(0.7);
@@ -610,7 +658,6 @@ class _SectionDots extends StatelessWidget {
             labelColor = Colors.white.withOpacity(0.3);
             subLabel = i == currentIndex + 1 ? 'Up next' : 'Upcoming';
           }
-
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -660,7 +707,6 @@ class _MarkChip extends StatelessWidget {
   final String label;
   final Color color;
   const _MarkChip({required this.label, required this.color});
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -681,7 +727,6 @@ class _NavArrow extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
   const _NavArrow({required this.icon, this.onTap});
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -715,7 +760,6 @@ class _ConfirmButton extends StatelessWidget {
     required this.hasSelection,
     required this.onTap,
   });
-
   @override
   Widget build(BuildContext context) {
     if (isConfirmed) {
@@ -737,7 +781,6 @@ class _ConfirmButton extends StatelessWidget {
         ),
       );
     }
-
     return GestureDetector(
       onTap: hasSelection ? onTap : null,
       child: Container(
@@ -769,14 +812,12 @@ class _NextSectionButton extends StatelessWidget {
   final PaperSessionState session;
   final VoidCallback onTap;
   const _NextSectionButton({required this.session, required this.onTap});
-
   @override
   Widget build(BuildContext context) {
     final isLast = session.currentSectionIndex >= session.sections.length - 1;
     final nextSection = isLast
         ? null
         : session.sections[session.currentSectionIndex + 1].config.label;
-
     return TextButton(
       onPressed: onTap,
       child: Text(
@@ -791,12 +832,9 @@ class _NextSectionButton extends StatelessWidget {
   }
 }
 
-// ─── Loading / Error views ────────────────────────────────────────────────────
-
 class _LoadingView extends StatelessWidget {
   final String message;
   const _LoadingView({required this.message});
-
   @override
   Widget build(BuildContext context) {
     return Center(
@@ -821,7 +859,6 @@ class _LoadingView extends StatelessWidget {
 class _ErrorView extends StatelessWidget {
   final String error;
   const _ErrorView({required this.error});
-
   @override
   Widget build(BuildContext context) {
     return Center(

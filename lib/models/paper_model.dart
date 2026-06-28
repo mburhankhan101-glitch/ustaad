@@ -2,35 +2,61 @@
 
 enum ExamType { fastNU, nustNET, nts }
 
+// ─── Sub‑source for composite sections ───────────────────────────────────────
+
+class SectionSource {
+  final String firestoreExam;
+  final String firestoreSection;
+  final String? additionalSection;
+  final int count; // questions to pull from this source
+
+  const SectionSource({
+    required this.firestoreExam,
+    required this.firestoreSection,
+    this.additionalSection,
+    required this.count,
+  });
+}
+
+// ─── SectionConfig ───────────────────────────────────────────────────────────
+
 class SectionConfig {
   final String id;
   final String label;
-  final String firestoreExam; // passed to arrayContains on 'exams' field
-  final String firestoreSection; // exact 'section' field value in Firestore
+
+  // For simple sections
+  final String firestoreExam;
+  final String firestoreSection;
+  final String? additionalSection;
+
+  // For composite sections (NUST maths = 70 AdvMaths + 30 Quantitative)
+  final List<SectionSource>? subSections;
+
   final int totalQuestions;
-  final int totalMinutes; // 0 = no per-section timer (NUST, NTS)
+  final int totalMinutes; // 0 = no per‑section timer
   final double markCorrect;
-  final double markWrong; // negative value or 0.0
-  // Progress is saved under this key: progressExam + section.
-  // Usually same as firestoreExam, but for shared sections (Analytical, English)
-  // we force the correct exam so progress goes to the right bucket.
+  final double markWrong;
   final String progressExam;
 
   const SectionConfig({
     required this.id,
     required this.label,
-    required this.firestoreExam,
-    required this.firestoreSection,
+    this.firestoreExam = '',
+    this.firestoreSection = '',
+    this.additionalSection,
+    this.subSections,
     required this.totalQuestions,
     required this.totalMinutes,
     required this.markCorrect,
     required this.markWrong,
-    String? progressExam, // defaults to firestoreExam if not set
+    String? progressExam,
   }) : progressExam = progressExam ?? firestoreExam;
 }
 
+// ─── Exam‑specific configs ───────────────────────────────────────────────────
+
 class PaperConfigs {
-  // ── FAST-NU — CS / AI / DS / SE / EE ──────────────────────────────────────
+  // FAST‑NU
   static const List<SectionConfig> fastCS = [
     SectionConfig(
       id: 'advancedMaths',
@@ -41,58 +67,65 @@ class PaperConfigs {
       totalMinutes: 50,
       markCorrect: 1.0,
       markWrong: -0.25,
-      // progressExam defaults to 'FAST-NU' ✅
     ),
     SectionConfig(
       id: 'basicMaths',
       label: 'Basic Maths',
-      firestoreExam: 'NTS', // ← questions are stored under NTS/Quantitative
-      firestoreSection:
-          'Quantitative', // ← actual section value in your Firestore
+      firestoreExam: 'NTS',
+      firestoreSection: 'Quantitative',
       totalQuestions: 20,
       totalMinutes: 20,
       markCorrect: 1.0,
       markWrong: -0.25,
-      progressExam: 'FAST-NU', // ← progress saved to FAST-NU bucket, not NTS
+      progressExam: 'FAST-NU',
     ),
     SectionConfig(
       id: 'analytical',
       label: 'Analytical & IQ',
-      firestoreExam: 'NTS', // ← analytical questions only have exams:["NTS"]
+      firestoreExam: 'NTS',
       firestoreSection: 'Analytical',
       totalQuestions: 20,
       totalMinutes: 20,
       markCorrect: 1.0,
       markWrong: -0.25,
-      progressExam: 'FAST-NU', // ← progress saved to FAST-NU bucket, not NTS
+      progressExam: 'FAST-NU',
     ),
     SectionConfig(
       id: 'english',
       label: 'English',
-      firestoreExam:
-          'FAST-NU', // ← English questions have exams:["FAST-NU","NTS","NUST-NET"]
+      firestoreExam: 'FAST-NU',
       firestoreSection: 'English',
       totalQuestions: 30,
       totalMinutes: 30,
       markCorrect: 0.344,
       markWrong: -0.0844,
-      // progressExam defaults to 'FAST-NU' ✅
     ),
   ];
 
-  // ── NUST-NET — Engineering / CS ────────────────────────────────────────────
-  // No per-section timer — global 180-minute clock only. No negative marking.
+  // NUST‑NET – UPDATED Mathematics section with corrected Firestore exam tags
   static const List<SectionConfig> nustEngineering = [
     SectionConfig(
       id: 'maths',
       label: 'Mathematics',
-      firestoreExam: 'NTS', // ← maths questions are in NTS/Quantitative pool
-      firestoreSection: 'Quantitative',
       totalQuestions: 100,
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      progressExam: 'NUST-NET', // ← progress saved to NUST-NET bucket
+      progressExam: 'NUST-NET',
+      subSections: const [
+        // Advanced Maths questions live under exam 'FAST-NU' in your Firestore
+        SectionSource(
+          firestoreExam: 'FAST-NU',
+          firestoreSection: 'Advanced Maths',
+          count: 70,
+        ),
+        // Quantitative questions live under 'NTS'
+        SectionSource(
+          firestoreExam: 'NTS',
+          firestoreSection: 'Quantitative',
+          count: 30,
+        ),
+      ],
     ),
     SectionConfig(
       id: 'physics',
@@ -103,7 +136,6 @@ class PaperConfigs {
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      // progressExam defaults to 'NUST-NET' ✅
     ),
     SectionConfig(
       id: 'english',
@@ -114,13 +146,10 @@ class PaperConfigs {
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      // progressExam defaults to 'NUST-NET' ✅
     ),
   ];
 
-  // ── NTS — General / COMSATS CS ─────────────────────────────────────────────
-  // Fixed order: English → Analytical → Quantitative → Computer Science
-  // No per-section timer — global 100-minute clock. No negative marking.
+  // NTS
   static const List<SectionConfig> ntsCS = [
     SectionConfig(
       id: 'english',
@@ -131,7 +160,6 @@ class PaperConfigs {
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      // progressExam defaults to 'NTS' ✅
     ),
     SectionConfig(
       id: 'analytical',
@@ -142,7 +170,6 @@ class PaperConfigs {
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      // progressExam defaults to 'NTS' ✅
     ),
     SectionConfig(
       id: 'quantitative',
@@ -153,7 +180,6 @@ class PaperConfigs {
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      // progressExam defaults to 'NTS' ✅
     ),
     SectionConfig(
       id: 'computerScience',
@@ -164,7 +190,6 @@ class PaperConfigs {
       totalMinutes: 0,
       markCorrect: 1.0,
       markWrong: 0.0,
-      // progressExam defaults to 'NTS' ✅
     ),
   ];
 

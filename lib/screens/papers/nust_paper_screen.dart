@@ -1,5 +1,4 @@
-// lib/screens/papers/nust_paper_screen.dart
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/providers/paper_provder.dart';
@@ -19,7 +18,12 @@ class _NustPaperScreenState extends ConsumerState<NustPaperScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(paperSessionProvider.notifier).startPaper(widget.examType);
+      ref
+          .read(paperSessionProvider.notifier)
+          .startPaper(
+            widget.examType,
+            uid: FirebaseAuth.instance.currentUser!.uid,
+          );
     });
   }
 
@@ -120,9 +124,9 @@ class _NustExamBody extends ConsumerWidget {
   final PaperSessionState session;
   const _NustExamBody({required this.session});
 
-  // NUST brand colour
   static const _green = Color(0xFF4CAF50);
   static const _greenLight = Color(0xFF81C784);
+  static const _kContentMaxWidth = 600.0;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -150,414 +154,434 @@ class _NustExamBody extends ConsumerWidget {
     );
     final totalSkipped = totalQuestions - totalAnswered;
 
-    return Column(
-      children: [
-        // ── Top bar: global timer + no-negative badge ──────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Total time remaining',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.4),
-                      fontSize: 9,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                  Text(
-                    timerStr,
-                    style: TextStyle(
-                      color: isUrgent ? const Color(0xFFFF6B6B) : Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: _green.withOpacity(0.15),
-                  border: Border.all(color: _green.withOpacity(0.3)),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      'Marking',
-                      style: TextStyle(
-                        color: _green.withOpacity(0.6),
-                        fontSize: 8,
-                        fontFamily: 'Poppins',
-                      ),
-                    ),
-                    const Text(
-                      'No negative',
-                      style: TextStyle(
-                        color: _greenLight,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Poppins',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth > _kContentMaxWidth;
+        final contentWidth = isWide ? _kContentMaxWidth : double.infinity;
 
-        const SizedBox(height: 10),
-
-        // ── Section tabs — all tappable, free switching ────────────────────
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Row(
-            children: List.generate(session.sections.length, (i) {
-              final s = session.sections[i];
-              final isActive = i == secIdx;
-              final answered = session.answeredInSection(i);
-              final total = s.questions.length;
-
-              return Expanded(
-                child: GestureDetector(
-                  onTap: () => ref
-                      .read(paperSessionProvider.notifier)
-                      .switchToSection(i),
-                  child: Container(
-                    margin: EdgeInsets.only(
-                      right: i < session.sections.length - 1 ? 6 : 0,
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: BoxDecoration(
-                      color: isActive
-                          ? _green.withOpacity(0.15)
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: isActive
-                            ? _green.withOpacity(0.4)
-                            : Colors.white.withOpacity(0.1),
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          s.config.label,
-                          style: TextStyle(
-                            color: isActive
-                                ? _greenLight
-                                : Colors.white.withOpacity(0.45),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            fontFamily: 'Poppins',
-                          ),
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '$answered/$total',
-                          style: TextStyle(
-                            color: isActive
-                                ? _greenLight.withOpacity(0.6)
-                                : Colors.white.withOpacity(0.25),
-                            fontSize: 8,
-                            fontFamily: 'Poppins',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-        ),
-
-        // Free switching hint
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 5, 18, 0),
-          child: Text(
-            'Tap any section above to switch — your answers are saved',
-            style: TextStyle(
-              color: _green.withOpacity(0.55),
-              fontSize: 9,
-              fontFamily: 'Poppins',
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 8),
-
-        // ── Question progress bar for current section ──────────────────────
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Q ${qIndex + 1} of ${section.questions.length} · ${section.config.label}',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.4),
-                      fontSize: 10,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                  Text(
-                    '${((qIndex + 1) / section.questions.length * 100).round()}%',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.4),
-                      fontSize: 10,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: (qIndex + 1) / section.questions.length,
-                  backgroundColor: Colors.white.withOpacity(0.1),
-                  valueColor: const AlwaysStoppedAnimation(_green),
-                  minHeight: 4,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // ── Mini scorecard ─────────────────────────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+        return Center(
+          child: SizedBox(
+            width: contentWidth,
+            child: Column(
               children: [
-                _ScoreChip(
-                  label: 'Answered',
-                  value: '$totalAnswered',
-                  color: Colors.white,
-                ),
-                _Divider(),
-                _ScoreChip(
-                  label: 'Skipped',
-                  value: '$totalSkipped',
-                  color: const Color(0xFFFFD700),
-                ),
-                _Divider(),
-                _ScoreChip(
-                  label: 'Current score',
-                  value: '$totalAnswered / 200',
-                  color: _greenLight,
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 8),
-
-        // ── Question card ──────────────────────────────────────────────────
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.07),
-                border: Border.all(color: Colors.white.withOpacity(0.12)),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Question ${qIndex + 1} · ${section.config.label}',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.35),
-                      fontSize: 10,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    question.text,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      height: 1.5,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Options — no lock, change anytime
-                  ...List.generate(question.options.length, (i) {
-                    final isSelected = answer?.selectedIndex == i;
-
-                    return GestureDetector(
-                      onTap: () => ref
-                          .read(paperSessionProvider.notifier)
-                          .selectOption(i),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
+                // ── Top bar: global timer + no-negative badge ──────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Total time remaining',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.4),
+                              fontSize: 9,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                          Text(
+                            timerStr,
+                            style: TextStyle(
+                              color: isUrgent
+                                  ? const Color(0xFFFF6B6B)
+                                  : Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 11,
+                          horizontal: 12,
+                          vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: isSelected
-                              ? _green.withOpacity(0.15)
-                              : Colors.white.withOpacity(0.05),
-                          border: Border.all(
-                            color: isSelected
-                                ? _green.withOpacity(0.5)
-                                : Colors.white.withOpacity(0.1),
-                          ),
-                          borderRadius: BorderRadius.circular(12),
+                          color: _green.withOpacity(0.15),
+                          border: Border.all(color: _green.withOpacity(0.3)),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Container(
-                              width: 24,
-                              height: 24,
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? _green
-                                    : Colors.white.withOpacity(0.08),
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                String.fromCharCode(65 + i),
-                                style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.white.withOpacity(0.5),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  fontFamily: 'Poppins',
-                                ),
+                            Text(
+                              'Marking',
+                              style: TextStyle(
+                                color: _green.withOpacity(0.6),
+                                fontSize: 8,
+                                fontFamily: 'Poppins',
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                question.options[i],
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontFamily: 'Poppins',
-                                ),
+                            const Text(
+                              'No negative',
+                              style: TextStyle(
+                                color: _greenLight,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                fontFamily: 'Poppins',
                               ),
                             ),
                           ],
                         ),
                       ),
-                    );
-                  }),
+                    ],
+                  ),
+                ),
 
-                  // No confirm button hint
-                  const SizedBox(height: 4),
-                  Text(
-                    'Tap option to select · change anytime',
+                const SizedBox(height: 10),
+
+                // ── Section tabs — all tappable, free switching ────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(
+                    children: List.generate(session.sections.length, (i) {
+                      final s = session.sections[i];
+                      final isActive = i == secIdx;
+                      final answered = session.answeredInSection(i);
+                      final total = s.questions.length;
+
+                      return Expanded(
+                        child: GestureDetector(
+                          onTap: () => ref
+                              .read(paperSessionProvider.notifier)
+                              .switchToSection(i),
+                          child: Container(
+                            margin: EdgeInsets.only(
+                              right: i < session.sections.length - 1 ? 6 : 0,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isActive
+                                  ? _green.withOpacity(0.15)
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: isActive
+                                    ? _green.withOpacity(0.4)
+                                    : Colors.white.withOpacity(0.1),
+                              ),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(
+                                  s.config.label,
+                                  style: TextStyle(
+                                    color: isActive
+                                        ? _greenLight
+                                        : Colors.white.withOpacity(0.45),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    fontFamily: 'Poppins',
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$answered/$total',
+                                  style: TextStyle(
+                                    color: isActive
+                                        ? _greenLight.withOpacity(0.6)
+                                        : Colors.white.withOpacity(0.25),
+                                    fontSize: 8,
+                                    fontFamily: 'Poppins',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+
+                // Free switching hint
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 5, 18, 0),
+                  child: Text(
+                    'Tap any section above to switch — your answers are saved',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.25),
-                      fontSize: 10,
+                      color: _green.withOpacity(0.55),
+                      fontSize: 9,
                       fontFamily: 'Poppins',
                     ),
                   ),
-                ],
-              ),
+                ),
+
+                const SizedBox(height: 8),
+
+                // ── Question progress bar for current section ──────────────────────
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Q ${qIndex + 1} of ${section.questions.length} · ${section.config.label}',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.4),
+                              fontSize: 10,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                          Text(
+                            '${((qIndex + 1) / section.questions.length * 100).round()}%',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.4),
+                              fontSize: 10,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: (qIndex + 1) / section.questions.length,
+                          backgroundColor: Colors.white.withOpacity(0.1),
+                          valueColor: const AlwaysStoppedAnimation(_green),
+                          minHeight: 4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Mini scorecard ─────────────────────────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      border: Border.all(color: Colors.white.withOpacity(0.08)),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _ScoreChip(
+                          label: 'Answered',
+                          value: '$totalAnswered',
+                          color: Colors.white,
+                        ),
+                        _Divider(),
+                        _ScoreChip(
+                          label: 'Skipped',
+                          value: '$totalSkipped',
+                          color: const Color(0xFFFFD700),
+                        ),
+                        _Divider(),
+                        _ScoreChip(
+                          label: 'Current score',
+                          value: '$totalAnswered / 200',
+                          color: _greenLight,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                // ── Question card ──────────────────────────────────────────────────
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.07),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.12),
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Question ${qIndex + 1} · ${section.config.label}',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.35),
+                              fontSize: 10,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            question.text,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              height: 1.5,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+
+                          // Options — no lock, change anytime
+                          ...List.generate(question.options.length, (i) {
+                            final isSelected = answer?.selectedIndex == i;
+
+                            return GestureDetector(
+                              onTap: () => ref
+                                  .read(paperSessionProvider.notifier)
+                                  .selectOption(i),
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 11,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? _green.withOpacity(0.15)
+                                      : Colors.white.withOpacity(0.05),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? _green.withOpacity(0.5)
+                                        : Colors.white.withOpacity(0.1),
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 24,
+                                      height: 24,
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? _green
+                                            : Colors.white.withOpacity(0.08),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        String.fromCharCode(65 + i),
+                                        style: TextStyle(
+                                          color: isSelected
+                                              ? Colors.white
+                                              : Colors.white.withOpacity(0.5),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          fontFamily: 'Poppins',
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        question.options[i],
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontFamily: 'Poppins',
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+
+                          // No confirm button hint
+                          const SizedBox(height: 4),
+                          Text(
+                            'Tap option to select · change anytime',
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.25),
+                              fontSize: 10,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                // ── Bottom nav: prev | submit | next ──────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _NavArrow(
+                        icon: Icons.chevron_left,
+                        color: _green,
+                        onTap: qIndex > 0
+                            ? () => ref
+                                  .read(paperSessionProvider.notifier)
+                                  .previousQuestion()
+                            : null,
+                      ),
+                      Text(
+                        '${qIndex + 1} / ${section.questions.length}',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.3),
+                          fontSize: 10,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                      _NavArrow(
+                        icon: Icons.chevron_right,
+                        color: _green,
+                        onTap: qIndex < section.questions.length - 1
+                            ? () => ref
+                                  .read(paperSessionProvider.notifier)
+                                  .nextQuestion()
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Submit button
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+                  child: GestureDetector(
+                    onTap: () => _confirmSubmit(context, ref),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF6B6B).withOpacity(0.15),
+                        border: Border.all(
+                          color: const Color(0xFFFF6B6B).withOpacity(0.3),
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        'Submit Paper',
+                        style: TextStyle(
+                          color: Color(0xFFFF6B6B),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-
-        // ── Bottom nav: prev | submit | next ──────────────────────────────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _NavArrow(
-                icon: Icons.chevron_left,
-                color: _green,
-                onTap: qIndex > 0
-                    ? () => ref
-                          .read(paperSessionProvider.notifier)
-                          .previousQuestion()
-                    : null,
-              ),
-              Text(
-                '${qIndex + 1} / ${section.questions.length}',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.3),
-                  fontSize: 10,
-                  fontFamily: 'Poppins',
-                ),
-              ),
-              _NavArrow(
-                icon: Icons.chevron_right,
-                color: _green,
-                onTap: qIndex < section.questions.length - 1
-                    ? () =>
-                          ref.read(paperSessionProvider.notifier).nextQuestion()
-                    : null,
-              ),
-            ],
-          ),
-        ),
-
-        // Submit button
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-          child: GestureDetector(
-            onTap: () => _confirmSubmit(context, ref),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B6B).withOpacity(0.15),
-                border: Border.all(
-                  color: const Color(0xFFFF6B6B).withOpacity(0.3),
-                ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.center,
-              child: const Text(
-                'Submit Paper',
-                style: TextStyle(
-                  color: Color(0xFFFF6B6B),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'Poppins',
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 

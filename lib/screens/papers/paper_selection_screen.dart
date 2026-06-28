@@ -1,6 +1,6 @@
 // lib/screens/papers/paper_selection_screen.dart
-// FIX: Each card now navigates to ProgramSelectionScreen first,
-// NOT directly to the paper screen.
+// Style C: Full-width dashboard on web, stacked on mobile.
+// Top navbar removed – content starts directly.
 
 import 'package:flutter/material.dart';
 import 'package:ustaad/models/paper_model.dart';
@@ -12,10 +12,13 @@ class PaperSelectionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isWeb = MediaQuery.of(context).size.width > 600;
+
     return Scaffold(
+      // No backgroundColor needed – gradient covers everything
       body: Container(
         width: double.infinity,
-        height: double.infinity,
+        height: double.infinity, // ✅ Fills entire screen vertically
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -28,147 +31,168 @@ class PaperSelectionScreen extends StatelessWidget {
             stops: [0.0, 0.5, 1.0],
           ),
         ),
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              const Padding(
-                padding: EdgeInsets.fromLTRB(22, 24, 22, 4),
-                child: Text(
-                  'Mock Papers',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w600,
-                    fontFamily: 'Poppins',
-                  ),
+        child: isWeb
+            ? SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 24,
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 0, 22, 20),
-                child: Text(
-                  'Full-length timed exams to test your endurance.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
-                    fontSize: 12,
-                    fontFamily: 'Poppins',
-                  ),
-                ),
-              ),
-
-              // Scrollable Paper List
-              Expanded(
+                child: _buildWebContent(context),
+              )
+            : SafeArea(
                 child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 18,
                     vertical: 8,
                   ),
-                  child: Column(
-                    children: [
-                      // ── FAST-NU ──────────────────────────────────────────
-                      _buildPaperCard(
-                        context,
-                        title: 'FAST-NU Entrance',
-                        duration: '120 mins',
-                        marks: '100 marks',
-                        tags: const [
-                          '50 Adv Math',
-                          '20 Basic Math',
-                          '20 IQ',
-                          '30 English',
-                        ],
-                        markingScheme:
-                            '+1 / −0.25 (Math, IQ)   ·   +0.344 / −0.0844 (English)',
-                        accentColor: const Color(0xFF6C63FF),
-                        // ↓ Navigate to ProgramSelectionScreen, not FastPaperScreen
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ProgramSelectionScreen(
-                              examType: ExamType.fastNU,
-                              userProgram: UserProgram.fastCS,
-                              // TODO: Replace UserProgram.fastCS with the value
-                              // stored from your TestSelectionScreen. For now
-                              // FAST always defaults to CS track.
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // ── NUST-NET ─────────────────────────────────────────
-                      _buildPaperCard(
-                        context,
-                        title: 'NUST NET (Engineering)',
-                        duration: '180 mins',
-                        marks: '200 marks',
-                        tags: const ['100 Math', '60 Physics', '40 English'],
-                        markingScheme: '+1   ·   No Negative Marking',
-                        accentColor: const Color(0xFF4CAF50),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ProgramSelectionScreen(
-                              examType: ExamType.nustNET,
-                              userProgram: UserProgram.nustEngineering,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // ── NTS ──────────────────────────────────────────────
-                      _buildPaperCard(
-                        context,
-                        title: 'NTS NAT (ICS/CS)',
-                        duration: '100 mins',
-                        marks: '90 marks',
-                        tags: const [
-                          '20 English',
-                          '20 Analytical',
-                          '20 Quantitative',
-                          '30 CS',
-                        ],
-                        markingScheme: '+1   ·   No Negative Marking',
-                        accentColor: const Color(0xFFFF6B6B),
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ProgramSelectionScreen(
-                              examType: ExamType.nts,
-                              userProgram: UserProgram.ntsCS,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 40),
-                    ],
-                  ),
+                  child: _buildMobileContent(context),
                 ),
               ),
-            ],
-          ),
-        ),
       ),
     );
   }
 
-  Widget _buildPaperCard(
-    BuildContext context, {
-    required String title,
-    required String duration,
-    required String marks,
-    required List<String> tags,
-    required String markingScheme,
-    required Color accentColor,
-    required VoidCallback onTap,
-  }) {
+  // ── Mobile layout (unchanged) ─────────────────────────────────────────
+  Widget _buildMobileContent(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(22, 24, 22, 4),
+          child: Text(
+            'Mock Papers',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'Poppins',
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 0, 22, 20),
+          child: Text(
+            'Full-length timed exams to test your endurance.',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.55),
+              fontSize: 12,
+              fontFamily: 'Poppins',
+            ),
+          ),
+        ),
+        Column(
+          children: [
+            _buildPaperCard(context, fastPaperCard(context)),
+            const SizedBox(height: 16),
+            _buildPaperCard(context, nustPaperCard(context)),
+            const SizedBox(height: 16),
+            _buildPaperCard(context, ntsPaperCard(context)),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Web content: three cards side by side ─────────────────────────────
+  Widget _buildWebContent(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Mock Papers',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 28,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'Poppins',
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Full-length timed exams to test your endurance.',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.55),
+            fontSize: 14,
+            fontFamily: 'Poppins',
+          ),
+        ),
+        const SizedBox(height: 32),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _buildPaperCard(context, fastPaperCard(context))),
+            const SizedBox(width: 20),
+            Expanded(child: _buildPaperCard(context, nustPaperCard(context))),
+            const SizedBox(width: 20),
+            Expanded(child: _buildPaperCard(context, ntsPaperCard(context))),
+          ],
+        ),
+        const SizedBox(height: 40),
+      ],
+    );
+  }
+
+  // ── Factory methods for card data ─────────────────────────────────────
+  _PaperCardData fastPaperCard(BuildContext context) => _PaperCardData(
+    title: 'FAST-NU Entrance',
+    duration: '120 mins',
+    marks: '100 marks',
+    tags: const ['50 Adv Math', '20 Basic Math', '20 IQ', '30 English'],
+    markingScheme: '+1 / −0.25 (Math, IQ)   ·   +0.344 / −0.0844 (English)',
+    accentColor: const Color(0xFF6C63FF),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.fastNU,
+          userProgram: UserProgram.fastCS,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData nustPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NUST NET (Engineering)',
+    duration: '180 mins',
+    marks: '200 marks',
+    tags: const ['100 Math', '60 Physics', '40 English'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF4CAF50),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.nustNET,
+          userProgram: UserProgram.nustEngineering,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData ntsPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NTS NAT (ICS/CS)',
+    duration: '100 mins',
+    marks: '90 marks',
+    tags: const ['20 English', '20 Analytical', '20 Quantitative', '30 CS'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFFFF6B6B),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.nts,
+          userProgram: UserProgram.ntsCS,
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildPaperCard(BuildContext context, _PaperCardData data) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: data.onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -184,7 +208,7 @@ class PaperSelectionScreen extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    title,
+                    data.title,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -195,14 +219,14 @@ class PaperSelectionScreen extends StatelessWidget {
                 ),
                 Icon(
                   Icons.arrow_forward_ios_rounded,
-                  color: accentColor.withOpacity(0.7),
+                  color: data.accentColor.withOpacity(0.7),
                   size: 14,
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              '$duration  •  $marks',
+              '${data.duration}  •  ${data.marks}',
               style: TextStyle(
                 color: Colors.white.withOpacity(0.6),
                 fontSize: 11,
@@ -213,15 +237,15 @@ class PaperSelectionScreen extends StatelessWidget {
             Wrap(
               spacing: 6,
               runSpacing: 6,
-              children: tags.map((tag) => _buildTag(tag)).toList(),
+              children: data.tags.map((tag) => _buildTag(tag)).toList(),
             ),
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: accentColor.withOpacity(0.08),
-                border: Border.all(color: accentColor.withOpacity(0.2)),
+                color: data.accentColor.withOpacity(0.08),
+                border: Border.all(color: data.accentColor.withOpacity(0.2)),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
@@ -230,7 +254,7 @@ class PaperSelectionScreen extends StatelessWidget {
                   Text(
                     'MARKING SCHEME',
                     style: TextStyle(
-                      color: accentColor.withOpacity(0.7),
+                      color: data.accentColor.withOpacity(0.7),
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.8,
@@ -239,7 +263,7 @@ class PaperSelectionScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    markingScheme,
+                    data.markingScheme,
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.75),
                       fontSize: 11,
@@ -272,4 +296,24 @@ class PaperSelectionScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PaperCardData {
+  final String title;
+  final String duration;
+  final String marks;
+  final List<String> tags;
+  final String markingScheme;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _PaperCardData({
+    required this.title,
+    required this.duration,
+    required this.marks,
+    required this.tags,
+    required this.markingScheme,
+    required this.accentColor,
+    required this.onTap,
+  });
 }

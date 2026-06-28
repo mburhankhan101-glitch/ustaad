@@ -4,6 +4,10 @@
 // Shows the correct program card based on what the user selected
 // on TestSelectionScreen — no extra choice needed.
 // Tapping "Start Paper" navigates to the correct exam screen.
+//
+// Responsive rules:
+//   Mobile  (<= 600 px)  — original design, 18 px side padding, unchanged.
+//   Web     (>  600 px)  — content capped at 700 px, centred, larger fonts.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,19 +18,7 @@ import 'package:ustaad/screens/papers/nts_paper_screen.dart';
 import 'package:ustaad/screens/papers/nust_paper_screen.dart';
 
 // ─── What the user picked on TestSelectionScreen ──────────────────────────────
-// Pass this in from wherever you store the user's test selection.
-// For now it's an enum — wire it to your auth/user provider as needed.
-
-enum UserProgram {
-  // FAST-NU
-  fastCS, // CS / AI / DS / SE / EE
-  fastBusiness, // Business / Fintech / Analytics
-  // NUST-NET
-  nustEngineering, // Engineering / CS
-  nustBusiness, // Business / Social Sciences
-  // NTS
-  ntsCS, // General / COMSATS CS
-}
+enum UserProgram { fastCS, fastBusiness, nustEngineering, nustBusiness, ntsCS }
 
 class ProgramSelectionScreen extends ConsumerWidget {
   final ExamType examType;
@@ -75,7 +67,6 @@ class ProgramSelectionScreen extends ConsumerWidget {
   // ── Build program info based on user's program ────────────────────────────
   _ProgramInfo get _programInfo {
     switch (userProgram) {
-      // ── FAST-NU ─────────────────────────────────────────────────────────
       case UserProgram.fastCS:
         return _ProgramInfo(
           label: 'CS / AI / DS / SE / EE',
@@ -116,7 +107,6 @@ class ProgramSelectionScreen extends ConsumerWidget {
           hasNegative: true,
         );
 
-      // ── NUST-NET ─────────────────────────────────────────────────────────
       case UserProgram.nustEngineering:
         return _ProgramInfo(
           label: 'Engineering / CS',
@@ -154,7 +144,6 @@ class ProgramSelectionScreen extends ConsumerWidget {
           hasNegative: false,
         );
 
-      // ── NTS ──────────────────────────────────────────────────────────────
       case UserProgram.ntsCS:
         return _ProgramInfo(
           label: 'General / COMSATS CS',
@@ -179,299 +168,449 @@ class ProgramSelectionScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isWeb = MediaQuery.of(context).size.width > 600;
     final info = _programInfo;
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0A0E2E), Color(0xFF1A1464), Color(0xFF6C63FF)],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── Header ──────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.08),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.12),
-                          ),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.chevron_left,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      _examLabel,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Poppins',
-                      ),
-                    ),
+      backgroundColor: const Color(0xFF0A0E2E),
+      body: Column(
+        children: [
+          if (isWeb) _buildWebNavBar(context),
+          Expanded(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFF0A0E2E),
+                    Color(0xFF1A1464),
+                    Color(0xFF6C63FF),
                   ],
                 ),
               ),
+              child: isWeb
+                  ? SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 40,
+                        vertical: 24,
+                      ),
+                      child: _buildWebContent(context, ref, info),
+                    )
+                  : SafeArea(
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: _buildMobileContent(context, ref, info),
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+  // ── Web navbar ─────────────────────────────────────────────────────────────
+  Widget _buildWebNavBar(BuildContext context) {
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        border: Border(
+          bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
+        ),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withOpacity(0.12)),
+              ),
+              child: const Icon(
+                Icons.chevron_left,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Text(
+            _examLabel,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  // ── Mobile layout — ORIGINAL DESIGN PRESERVED ──────────────────────────────
+  // All side padding is 18 px, matching the original pre-refactor layout.
+  Widget _buildMobileContent(
+    BuildContext context,
+    WidgetRef ref,
+    _ProgramInfo info,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Back button + title
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.08),
+                    border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.chevron_left,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _examLabel,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Subtitle
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+          child: Text(
+            'Your program',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.45),
+              fontSize: 12,
+              fontFamily: 'Poppins',
+            ),
+          ),
+        ),
+
+        // ── FIX: horizontal padding restored (DeepSeek had removed these) ──
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: _buildProgramCard(context, info, isWeb: false),
+        ),
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: _buildWarningBanner(isWeb: false),
+        ),
+        const SizedBox(height: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: _buildStartButton(context, ref),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
+  // ── Web content — centred card with max width ──────────────────────────────
+  Widget _buildWebContent(
+    BuildContext context,
+    WidgetRef ref,
+    _ProgramInfo info,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _examLabel,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'Poppins',
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Your program',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.55),
+            fontSize: 14,
+            fontFamily: 'Poppins',
+          ),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
+            // isWeb: true → larger fonts inside the card
+            child: _buildProgramCard(context, info, isWeb: true),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
+            child: _buildWarningBanner(isWeb: true),
+          ),
+        ),
+        const SizedBox(height: 24),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 500),
+            child: _buildStartButton(context, ref),
+          ),
+        ),
+        const SizedBox(height: 40),
+      ],
+    );
+  }
+
+  // ── Shared widgets ──────────────────────────────────────────────────────────
+
+  // isWeb scales label, subtitle, marking text up by ~2 pt for readability.
+  Widget _buildProgramCard(
+    BuildContext context,
+    _ProgramInfo info, {
+    bool isWeb = false,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(isWeb ? 22 : 18),
+      decoration: BoxDecoration(
+        color: _accent.withOpacity(0.15),
+        border: Border.all(color: _accent.withOpacity(0.45)),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // "YOUR PROGRAM" badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: _accent.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              'YOUR PROGRAM',
+              style: TextStyle(
+                color: _accentLight,
+                fontSize: isWeb ? 10 : 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1,
+                fontFamily: 'Poppins',
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Program label
+          Text(
+            info.label,
+            style: TextStyle(
+              color: Colors.white,
+              // Web: 17 px.  Mobile: 15 px (original).
+              fontSize: isWeb ? 17 : 15,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const SizedBox(height: 2),
+
+          // Program subtitle
+          Text(
+            info.subtitle,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.45),
+              // Web: 13 px.  Mobile: 11 px (original).
+              fontSize: isWeb ? 13 : 11,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Section chips
+          Wrap(spacing: 6, runSpacing: 6, children: info.sections),
+          const SizedBox(height: 14),
+
+          // Stats row
+          Row(
+            children: [
+              _StatChip(
+                label: 'MCQs',
+                value: '${info.totalMCQs}',
+                isWeb: isWeb,
+              ),
+              const SizedBox(width: 12),
+              _StatChip(label: 'Time', value: info.totalTime, isWeb: isWeb),
+              const SizedBox(width: 12),
+              _StatChip(label: 'Marks', value: info.totalMarks, isWeb: isWeb),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: info.hasNegative
+                      ? const Color(0xFFFF6B6B).withOpacity(0.15)
+                      : const Color(0xFF4CAF50).withOpacity(0.15),
+                  border: Border.all(
+                    color: info.hasNegative
+                        ? const Color(0xFFFF6B6B).withOpacity(0.3)
+                        : const Color(0xFF4CAF50).withOpacity(0.3),
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: Text(
-                  'Your program',
+                  info.hasNegative ? 'Negative' : 'No negative',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.45),
-                    fontSize: 12,
+                    color: info.hasNegative
+                        ? const Color(0xFFFF6B6B)
+                        : const Color(0xFF4CAF50),
+                    fontSize: isWeb ? 10 : 9,
+                    fontWeight: FontWeight.w600,
                     fontFamily: 'Poppins',
                   ),
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 14),
 
-              // ── Program card ─────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: _accent.withOpacity(0.15),
-                    border: Border.all(color: _accent.withOpacity(0.45)),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // "YOUR PROGRAM" badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _accent.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          'YOUR PROGRAM',
-                          style: TextStyle(
-                            color: _accentLight,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                            fontFamily: 'Poppins',
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 10),
-
-                      Text(
-                        info.label,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        info.subtitle,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.45),
-                          fontSize: 11,
-                          fontFamily: 'Poppins',
-                        ),
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      // Section tags
-                      Wrap(spacing: 6, runSpacing: 6, children: info.sections),
-
-                      const SizedBox(height: 14),
-
-                      // Stats row: MCQs | Time | Marks
-                      Row(
-                        children: [
-                          _StatChip(label: 'MCQs', value: '${info.totalMCQs}'),
-                          const SizedBox(width: 12),
-                          _StatChip(label: 'Time', value: info.totalTime),
-                          const SizedBox(width: 12),
-                          _StatChip(label: 'Marks', value: info.totalMarks),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: info.hasNegative
-                                  ? const Color(0xFFFF6B6B).withOpacity(0.15)
-                                  : const Color(0xFF4CAF50).withOpacity(0.15),
-                              border: Border.all(
-                                color: info.hasNegative
-                                    ? const Color(0xFFFF6B6B).withOpacity(0.3)
-                                    : const Color(0xFF4CAF50).withOpacity(0.3),
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              info.hasNegative ? 'Negative' : 'No negative',
-                              style: TextStyle(
-                                color: info.hasNegative
-                                    ? const Color(0xFFFF6B6B)
-                                    : const Color(0xFF4CAF50),
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                fontFamily: 'Poppins',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      // Marking scheme box
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: _accent.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'MARKING SCHEME',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.4),
-                                fontSize: 9,
-                                letterSpacing: 1,
-                                fontFamily: 'Poppins',
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            ...info.markingLines.map(
-                              (line) => Padding(
-                                padding: const EdgeInsets.only(bottom: 3),
-                                child: Text(
-                                  line,
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                    fontFamily: 'Poppins',
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+          // Marking scheme box
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _accent.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'MARKING SCHEME',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.4),
+                    fontSize: isWeb ? 10 : 9,
+                    letterSpacing: 1,
+                    fontFamily: 'Poppins',
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // ── Warning banner ────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF6B6B).withOpacity(0.08),
-                    border: Border.all(
-                      color: const Color(0xFFFF6B6B).withOpacity(0.25),
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('⚠', style: TextStyle(fontSize: 14)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          examType == ExamType.nustNET
-                              ? 'Exam Mode: One global timer of 180 min. '
-                                    'You can freely switch between Maths, Physics and English at any time. '
-                                    'Paper auto-submits when time is up.'
-                              : examType == ExamType.nts
-                              ? 'Exam Mode: One global timer of 100 min. '
-                                    'Sections appear in order: English → Analytical → Quantitative → CS. '
-                                    'Paper auto-submits when time is up.'
-                              : 'Exam Mode: Sections are randomised. Each section has its own timer. '
-                                    'You cannot return to a previous section once you move forward. '
-                                    'Paper auto-submits when time is up.',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.55),
-                            fontSize: 11,
-                            height: 1.5,
-                            fontFamily: 'Poppins',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const Spacer(),
-
-              // ── Start Paper button ────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
-                child: GestureDetector(
-                  onTap: () => _startPaper(context, ref),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [_accent, _accentLight]),
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _accent.withOpacity(0.4),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'Start Paper  ›',
+                const SizedBox(height: 6),
+                ...info.markingLines.map(
+                  (line) => Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Text(
+                      line,
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
+                        color: Colors.white70,
+                        // Web: 13 px.  Mobile: 11 px (original).
+                        fontSize: isWeb ? 13 : 11,
                         fontFamily: 'Poppins',
                       ),
                     ),
                   ),
                 ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWarningBanner({bool isWeb = false}) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFF6B6B).withOpacity(0.08),
+        border: Border.all(color: const Color(0xFFFF6B6B).withOpacity(0.25)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('⚠', style: TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              examType == ExamType.nustNET
+                  ? 'Exam Mode: One global timer of 180 min. '
+                        'You can freely switch between Maths, Physics and English at any time. '
+                        'Paper auto-submits when time is up.'
+                  : examType == ExamType.nts
+                  ? 'Exam Mode: One global timer of 100 min. '
+                        'Sections appear in order: English → Analytical → Quantitative → CS. '
+                        'Paper auto-submits when time is up.'
+                  : 'Exam Mode: Sections are randomised. Each section has its own timer. '
+                        'You cannot return to a previous section once you move forward. '
+                        'Paper auto-submits when time is up.',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.55),
+                // Web: 13 px.  Mobile: 11 px (original).
+                fontSize: isWeb ? 13 : 11,
+                height: 1.5,
+                fontFamily: 'Poppins',
               ),
-            ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStartButton(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      onTap: () => _startPaper(context, ref),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [_accent, _accentLight]),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: _accent.withOpacity(0.4),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: const Text(
+          'Start Paper  ›',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'Poppins',
           ),
         ),
       ),
@@ -479,7 +618,6 @@ class ProgramSelectionScreen extends ConsumerWidget {
   }
 
   void _startPaper(BuildContext context, WidgetRef ref) {
-    // Reset any previous session before starting a new one
     ref.read(paperSessionProvider.notifier).reset();
 
     Widget screen;
@@ -523,7 +661,7 @@ class _ProgramInfo {
   });
 }
 
-// ─── Reusable widgets ─────────────────────────────────────────────────────────
+// ─── Small shared widgets ─────────────────────────────────────────────────────
 
 class _SectionTag extends StatelessWidget {
   final String label;
@@ -552,7 +690,13 @@ class _SectionTag extends StatelessWidget {
 class _StatChip extends StatelessWidget {
   final String label;
   final String value;
-  const _StatChip({required this.label, required this.value});
+  // isWeb passed down so the stat value scales too
+  final bool isWeb;
+  const _StatChip({
+    required this.label,
+    required this.value,
+    this.isWeb = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -563,15 +707,16 @@ class _StatChip extends StatelessWidget {
           label,
           style: TextStyle(
             color: Colors.white.withOpacity(0.4),
-            fontSize: 9,
+            fontSize: isWeb ? 10 : 9,
             fontFamily: 'Poppins',
           ),
         ),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
-            fontSize: 13,
+            // Web: 15 px.  Mobile: 13 px (original).
+            fontSize: isWeb ? 15 : 13,
             fontWeight: FontWeight.w700,
             fontFamily: 'Poppins',
           ),
