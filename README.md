@@ -275,7 +275,7 @@ flutter run
 **Burhan Khan** — Flutter Developer, Lahore, Pakistan  
 Self-taught. Started Flutter in February 2026. Shipped Ustaad to real users in 4 months.
 
-[![LinkedIn](https://img.shields.io/badge/https://www.linkedin.com/in/burhan-khan-b4458737b/)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Burhan%20Khan-0A66C2?logo=linkedin)](https://www.linkedin.com/in/burhan-khan-b4458737b/)
 [![GitHub](https://img.shields.io/badge/GitHub-mburhankhan101--glitch-181717?logo=github)](https://github.com/mburhankhan101-glitch)
 [![Email](https://img.shields.io/badge/Email-m.burhan.khan101%40gmail.com-EA4335?logo=gmail&logoColor=white)](mailto:m.burhan.khan101@gmail.com)
 
