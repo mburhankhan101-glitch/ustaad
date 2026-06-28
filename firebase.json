@@ -1,1 +1,74 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"ustaad-ai-app","appId":"1:1047925796647:android:307789d65d1d6532864302","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"ustaad-ai-app","configurations":{"android":"1:1047925796647:android:307789d65d1d6532864302","ios":"1:1047925796647:ios:4c67a474c6a1e88c864302","macos":"1:1047925796647:ios:4c67a474c6a1e88c864302","web":"1:1047925796647:web:44d0406d5d4c1057864302","windows":"1:1047925796647:web:b3517d68787db315864302"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "ustaad-ai-app",
+          "appId": "1:1047925796647:android:307789d65d1d6532864302",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "ustaad-ai-app",
+          "configurations": {
+            "android": "1:1047925796647:android:307789d65d1d6532864302",
+            "ios": "1:1047925796647:ios:4c67a474c6a1e88c864302",
+            "macos": "1:1047925796647:ios:4c67a474c6a1e88c864302",
+            "web": "1:1047925796647:web:44d0406d5d4c1057864302",
+            "windows": "1:1047925796647:web:b3517d68787db315864302"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+  {
+    "source": "**/*.@(js|css|wasm)",
+    "headers": [
+      { "key": "Cache-Control", "value": "max-age=31536000, immutable" }
+    ]
+  },
+  {
+    "source": "**/*.@(png|jpg|jpeg|gif|svg|ico|woff|woff2)",
+    "headers": [
+      { "key": "Cache-Control", "value": "max-age=31536000, immutable" }
+    ]
+  },
+  {
+    "source": "/index.html",
+    "headers": [
+      { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+      { "key": "Pragma", "value": "no-cache" }
+    ]
+  },
+  {
+    "source": "/flutter_service_worker.js",
+    "headers": [
+      { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+      { "key": "Pragma", "value": "no-cache" }
+    ]
+  },
+  {
+    "source": "/main.dart.js",
+    "headers": [
+      { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+      { "key": "Pragma", "value": "no-cache" }
+    ]
+  }
+]
+  }
+}
