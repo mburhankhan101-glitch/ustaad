@@ -1,6 +1,13 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart'; // ✅ for kIsWeb
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lottie/lottie.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ustaad/screens/auth/login_screen.dart';
+import 'package:ustaad/screens/auth/signup_screen.dart';
+import 'package:ustaad/screens/auth/verify_email_screen.dart';
+import 'package:ustaad/screens/home/home_screen.dart';
 import 'package:ustaad/screens/onboarding/onboarding_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -46,22 +53,96 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
           ),
         );
 
-    _controller.forward();
+    // ─────────────────────────────────────────────────────────────────────────
+    // ✅ WEB vs MOBILE ROUTING
+    //
+    // On WEB  → skip splash animation + skip onboarding entirely.
+    //           Navigate immediately after a single frame so the gradient
+    //           background still paints (avoids a white flash).
+    //
+    // On MOBILE → run the full 2.5s branded splash, then check onboarding.
+    // ─────────────────────────────────────────────────────────────────────────
+    if (kIsWeb) {
+      // Start the animation anyway so the screen isn't blank on that one frame
+      _controller.forward();
 
-    Future.delayed(const Duration(milliseconds: 2500), () {
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        PageRouteBuilder(
-          pageBuilder: (_, __, ___) => const OnboardingScreen(),
-          transitionsBuilder: (_, animation, __, child) {
-            // Smooth fade transition instead of hard cut
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 500),
-        ),
-      );
-    });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _navigateFromSplash();
+      });
+    } else {
+      _controller.forward();
+
+      Future.delayed(const Duration(milliseconds: 2500), () {
+        _navigateFromSplash();
+      });
+    }
+  }
+
+  /// Central navigation logic — called by both web (immediately) and mobile (after delay).
+  Future<void> _navigateFromSplash() async {
+    if (!mounted) return;
+
+    final Widget destination = await _resolveDestination();
+
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => destination,
+        transitionsBuilder: (_, animation, __, child) =>
+            FadeTransition(opacity: animation, child: child),
+        // ✅ Faster fade on web (no theatrical transition needed)
+        transitionDuration: Duration(milliseconds: kIsWeb ? 200 : 500),
+      ),
+    );
+  }
+
+  Future<Widget> _resolveDestination() async {
+    // ── Step 1: Check Firebase auth ─────────────────────────────────────────
+    User? user;
+    try {
+      user = FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      // Firebase not initialized or offline — fall through to login
+      user = null;
+    }
+
+    if (user != null) {
+      if (user.emailVerified) {
+        return const HomeScreen();
+      } else {
+        // Logged in but email not verified yet
+        return const VerifyEmailScreen();
+      }
+    }
+
+    // ── Step 2: Web path — skip onboarding, check for ?signup=true ──────────
+    if (kIsWeb) {
+      // ✅ Read URL query params passed from the landing page buttons
+      // Hero.js sends "?signup=true" when the Register button is clicked
+      final queryParams = Uri.base.queryParameters;
+      if (queryParams['signup'] == 'true') {
+        return const SignupScreen();
+      }
+      // All other cases on web → LoginScreen
+      return const LoginScreen();
+    }
+
+    // ── Step 3: Mobile path — check onboarding flag ──────────────────────────
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
+
+      if (hasSeenOnboarding) {
+        return const LoginScreen();
+      } else {
+        await prefs.setBool('hasSeenOnboarding', true);
+        return const OnboardingScreen();
+      }
+    } catch (_) {
+      // SharedPreferences failed (shouldn't happen, but be safe)
+      return const LoginScreen();
+    }
   }
 
   @override
@@ -72,28 +153,25 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    // ✅ On web, this screen is visible for ~1 frame.
+    // On mobile, it shows for the full 2.5s.
+    // Both get the same gradient — it just flashes briefly on web (intentional branding).
+
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
       body: Container(
-        // ── Gradient Background ─────────────────────
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF0A0E2E), // deep navy — top left
-              Color(0xFF1A1464), // rich dark blue — middle
-              Color(0xFF6C63FF), // purple — bottom right
-            ],
+            colors: [Color(0xFF0A0E2E), Color(0xFF1A1464), Color(0xFF6C63FF)],
             stops: [0.0, 0.5, 1.0],
           ),
         ),
-
         child: Stack(
           children: [
-            // ── Background Decorative Circles ────────
-            // Top right circle
+            // ── Background decorative circles ─────────────────────────────
             Positioned(
               top: -80,
               right: -80,
@@ -106,8 +184,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                 ),
               ),
             ),
-
-            // Bottom left circle
             Positioned(
               bottom: -100,
               left: -60,
@@ -120,8 +196,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                 ),
               ),
             ),
-
-            // Middle decorative circle
             Positioned(
               top: screenHeight * 0.15,
               left: -40,
@@ -135,13 +209,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               ),
             ),
 
-            // ── Main Content ─────────────────────────
+            // ── Main content ──────────────────────────────────────────────
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Spacer(flex: 2),
 
-                // Owl Lottie Animation
                 ScaleTransition(
                   scale: _scaleAnimation,
                   child: Lottie.asset(
@@ -153,20 +226,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
                 const SizedBox(height: 32),
 
-                // App Name + Tagline
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: SlideTransition(
                     position: _slideAnimation,
                     child: Column(
                       children: [
-                        // USTAAD text
                         ShaderMask(
                           shaderCallback: (bounds) => const LinearGradient(
                             colors: [
                               Color.fromARGB(255, 190, 196, 220),
                               Color(0xFFB8B4FF),
-                              // light purple-white
                             ],
                           ).createShader(bounds),
                           child: const Text(
@@ -180,10 +250,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 10),
-
-                        // Tagline
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 20,
@@ -207,10 +274,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 12),
-
-                        // AI Powered badge
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -254,43 +318,44 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
                 const Spacer(flex: 2),
 
-                // Loading bar at bottom
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 60,
-                    vertical: 48,
-                  ),
-                  child: Column(
-                    children: [
-                      TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0.0, end: 1.0),
-                        duration: const Duration(seconds: 3),
-                        builder: (context, value, child) {
-                          return ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: LinearProgressIndicator(
-                              value: value,
-                              backgroundColor: Colors.white.withOpacity(0.15),
-                              valueColor: const AlwaysStoppedAnimation(
-                                Colors.white,
+                // ✅ Only show progress bar on mobile — on web it's never visible
+                if (!kIsWeb)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 60,
+                      vertical: 48,
+                    ),
+                    child: Column(
+                      children: [
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0.0, end: 1.0),
+                          duration: const Duration(seconds: 3),
+                          builder: (context, value, child) {
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: LinearProgressIndicator(
+                                value: value,
+                                backgroundColor: Colors.white.withOpacity(0.15),
+                                valueColor: const AlwaysStoppedAnimation(
+                                  Colors.white,
+                                ),
+                                minHeight: 3,
                               ),
-                              minHeight: 3,
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Preparing your experience...',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 12,
-                          color: Colors.white38,
+                            );
+                          },
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Preparing your experience...',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 12,
+                            color: Colors.white38,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
           ],

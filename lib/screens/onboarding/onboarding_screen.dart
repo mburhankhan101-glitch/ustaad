@@ -30,19 +30,19 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       "lottie": "assets/images/study_stress.json",
       "title": "Exam aa raha hai?\nTension mat lo!",
       "subtitle":
-          "MDCAT, ECAT aur NTS ki preparation ab smart tarike se karo — jahan bhi, jab bhi",
+          "Fast NU, NET aur NTS ki preparation ab smart tarike se karo — jahan bhi, jab bhi",
     },
     {
       "lottie": "assets/images/past_papers.json",
       "title": "Past Papers\nSolve Karo",
       "subtitle":
-          "2010 se 2024 tak ke real past paper questions — topic by topic, subject by subject",
+          "Solve real past papers in a full exam environment\nTimed sections, negative marking, real exam pressure",
     },
     {
       "lottie": "assets/images/ustu_owl.json",
-      "title": "Ustaad Se\nSeedho 🦉",
+      "title": "Ustaad Se\nSeekho 🦉",
       "subtitle":
-          "Galat jawab diya? Koi baat nahi!\nUstaad AI explain karega — English ya Urdu mein",
+          "Galat jawab diya? Koi baat nahi!\nUstaad explain karega English ya Urdu mein",
     },
   ];
 
