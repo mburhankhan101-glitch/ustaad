@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase & API Keys — NEVER commit these
+android/app/google-services.json
+android/app/google-services (1).json
+ios/Runner/GoogleService-Info.plist
+lib/core/constants/env.dart
+*.env
+.env*
