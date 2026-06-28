@@ -1,42 +1,43 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ← for orientation lock
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:ustaad/providers/auth_provider.dart';
-import 'package:ustaad/screens/auth/login_screen.dart';
-import 'package:ustaad/screens/auth/signup_screen.dart';
-import 'package:ustaad/screens/auth/test_selection.dart';
-import 'package:ustaad/screens/auth/verify_email_screen.dart';
-import 'package:ustaad/screens/home/home_screen.dart';
-import 'core/theme/app_theme.dart';
-import 'firebase_options.dart';
-import 'screens/splash/splash_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:ustaad/core/router/app_router.dart';
+import 'package:ustaad/core/theme/app_theme.dart';
+import 'package:ustaad/firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Lock the entire app to portrait mode on mobile devices.
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const ProviderScope(child: MyApp()));
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+
+    return MaterialApp.router(
       title: 'Ustaad',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const SplashScreen(),
-        '/login': (context) => const LoginScreen(),
-        '/signup': (context) => const SignupScreen(),
-        '/verify_email': (context) => const VerifyEmailScreen(),
-        '/test_selection': (context) => const TestSelectionScreen(),
-        '/auth_wrapper': (context) => const AuthWrapper(),
-        '/home': (context) => const HomeScreen(),
-      },
+      theme: AppTheme.lightTheme.copyWith(
+        scrollbarTheme: ScrollbarThemeData(
+          thumbColor: WidgetStateProperty.all(Colors.white.withOpacity(0.6)),
+          trackColor: WidgetStateProperty.all(Colors.white.withOpacity(0.1)),
+          radius: const Radius.circular(8),
+          thickness: WidgetStateProperty.all(8),
+        ),
+      ),
+      routerConfig: router,
     );
   }
 }
