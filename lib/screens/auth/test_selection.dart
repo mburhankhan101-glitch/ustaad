@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -194,7 +195,20 @@ final _tests = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 class TestSelectionScreen extends StatefulWidget {
-  const TestSelectionScreen({super.key});
+  /// Set to true when launched from ProfileScreen to change existing selections.
+  /// When false (default) — onboarding flow after signup.
+  final bool isEditing;
+
+  /// Pre-populate with user's current selections when [isEditing] is true.
+  final List<String> initialTests;
+  final String? initialDegree;
+
+  const TestSelectionScreen({
+    super.key,
+    this.isEditing = false,
+    this.initialTests = const [],
+    this.initialDegree,
+  });
 
   @override
   State<TestSelectionScreen> createState() => _TestSelectionScreenState();
@@ -291,6 +305,16 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
 
     // always show the button area (just disabled until valid)
     _btnController.forward();
+
+    // ── Pre-populate when editing existing selections ─────────────────────
+    if (widget.isEditing) {
+      _selectedTestIds.addAll(widget.initialTests);
+      _selectedDegreeId = widget.initialDegree;
+      // Trigger owl bounce so user sees the pre-filled state
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ustuController.forward(from: 0);
+      });
+    }
   }
 
   @override
@@ -323,37 +347,149 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
     _ustuController.forward(from: 0);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // _continue — handles BOTH onboarding (isEditing=false) and profile edit
+  // (isEditing=true). In edit mode: detects no-change, shows warning dialog,
+  // clears exam-specific Firestore data, then pops instead of going to /home.
+  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _continue() async {
     if (!_canContinue || _isSaving) return;
+
+    final degreeId = _selectedDegreeId;
+    if (degreeId == null || _selectedTestIds.isEmpty) return;
+
+    // ── Edit mode: no-change detection ──────────────────────────────────────
+    if (widget.isEditing) {
+      final sameTests =
+          _selectedTestIds.length == widget.initialTests.length &&
+          _selectedTestIds.containsAll(widget.initialTests);
+      final sameDegree = _selectedDegreeId == widget.initialDegree;
+
+      if (sameTests && sameDegree) {
+        if (!mounted) return;
+        Navigator.pop(context, false); // signal: nothing changed
+        return;
+      }
+
+      // ── Confirm before overwriting ─────────────────────────────────────
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1464),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            '⚠️  Confirm Change',
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
+          ),
+          content: Text(
+            'Changing your exam or degree will reset:\n\n'
+            '  • Your weak topic history\n'
+            '  • Any incomplete quiz session\n\n'
+            'Your streak, accuracy, and total questions solved will stay.',
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              color: Colors.white.withOpacity(0.78),
+              fontSize: 13,
+              height: 1.55,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  color: Colors.white.withOpacity(0.5),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'Yes, Change',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF6C63FF),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return; // user cancelled
+    }
+
     setState(() => _isSaving = true);
 
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
+        // ── Build subject weightages map ─────────────────────────────────
         final Map<String, dynamic> testWeightages = {};
         for (final testId in _selectedTestIds) {
-          final test = _tests.firstWhere((t) => t.id == testId);
-          final subjects = test.subjectsFor(_selectedDegreeId);
+          final test = _tests.firstWhere(
+            (t) => t.id == testId,
+            orElse: () => _tests.first,
+          );
+          final subjects = test.subjectsFor(degreeId);
           testWeightages[testId] = subjects
               .map((s) => {'subject': s.name, 'weightage': s.weightage})
               .toList();
         }
 
+        // ── Write new selections ─────────────────────────────────────────
         await FirebaseFirestore.instance.collection('users').doc(uid).set({
           'selectedTests': _selectedTestIds.toList(),
-          'targetDegree': _selectedDegreeId,
+          'targetDegree': degreeId,
           'testWeightages': testWeightages,
           'testSelectedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+
+        // ── Edit mode: clear exam-specific data that is now stale ────────
+        // weakTopics and incompleteSession are tied to the old exam/sections.
+        // Streak, accuracy, totalSolved etc. are global — leave them alone.
+        if (widget.isEditing) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(uid)
+                .update({
+                  'weakTopics': FieldValue.delete(),
+                  'weakTopicSections': FieldValue.delete(),
+                  'weakTopicExam': FieldValue.delete(),
+                  'weakTopicSection': FieldValue.delete(),
+                  'lastWeakTopicShownDate': FieldValue.delete(),
+                  'incompleteSession': FieldValue.delete(),
+                });
+          } catch (_) {
+            // Fields may not exist yet for new users — not an error
+          }
+        }
       }
 
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/home');
+
+      if (widget.isEditing) {
+        Navigator.pop(context, true); // signal: saved successfully
+      } else {
+        context.go('/home'); // onboarding flow — navigate to home
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Could not save. Please try again.'),
+          content: Text('Could not save: $e'),
           backgroundColor: Colors.red.shade700,
         ),
       );
@@ -419,6 +555,22 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
             SafeArea(
               child: Column(
                 children: [
+                  // ── Back button — only shown when editing from Profile ────
+                  if (widget.isEditing)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8, top: 8),
+                        child: IconButton(
+                          icon: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          onPressed: () => Navigator.pop(context, false),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
@@ -427,7 +579,7 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            const SizedBox(height: 28),
+                            SizedBox(height: widget.isEditing ? 8 : 28),
 
                             ScaleTransition(
                               scale: _ustuBounce,
@@ -441,8 +593,10 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
 
                             const SizedBox(height: 20),
 
-                            const Text(
-                              'Personalise Your Prep 🎯',
+                            Text(
+                              widget.isEditing
+                                  ? 'Update Your Prep 🎯'
+                                  : 'Personalise Your Prep 🎯',
                               style: TextStyle(
                                 fontFamily: 'Poppins',
                                 fontSize: 24,
@@ -455,7 +609,9 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
                             const SizedBox(height: 6),
 
                             Text(
-                              'Select all exams you\'re preparing for.\nUstu will tailor your quizzes accordingly.',
+                              widget.isEditing
+                                  ? 'Update your exams and degree.\nWeak topic history will reset on change.'
+                                  : 'Select all exams you\'re preparing for.\nUstu will tailor your quizzes accordingly.',
                               style: TextStyle(
                                 fontFamily: 'Poppins',
                                 fontSize: 13,
@@ -584,18 +740,22 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
                                   )
                                 : Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
-                                    children: const [
+                                    children: [
                                       Text(
-                                        "Let's Go!",
-                                        style: TextStyle(
+                                        widget.isEditing
+                                            ? 'Save Changes'
+                                            : "Let's Go!",
+                                        style: const TextStyle(
                                           fontFamily: 'Poppins',
                                           fontSize: 16,
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
-                                      SizedBox(width: 8),
+                                      const SizedBox(width: 8),
                                       Icon(
-                                        Icons.arrow_forward_rounded,
+                                        widget.isEditing
+                                            ? Icons.check_rounded
+                                            : Icons.arrow_forward_rounded,
                                         size: 20,
                                       ),
                                     ],

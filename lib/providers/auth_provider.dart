@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/auth/test_selection.dart';
 import 'package:ustaad/screens/auth/verify_email_screen.dart';
+import 'package:ustaad/screens/home/home_screen.dart';
 
 import '../services/auth_service.dart';
 
@@ -14,24 +16,15 @@ import '../services/auth_service.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum AuthStatus {
-  /// App just launched, we don't know yet
   initial,
-
-  /// Firebase is checking — show a loader
   loading,
-
-  /// Logged in AND email verified
   authenticated,
-
-  /// Logged in but email NOT yet verified
   emailUnverified,
-
-  /// Not logged in at all
   unauthenticated,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUTH STATE  (immutable snapshot)
+// AUTH STATE
 // ─────────────────────────────────────────────────────────────────────────────
 
 class AuthState {
@@ -45,7 +38,6 @@ class AuthState {
     this.errorMessage,
   });
 
-  /// Convenience getters
   bool get isAuthenticated => status == AuthStatus.authenticated;
   bool get isLoading => status == AuthStatus.loading;
   bool get isUnauthenticated => status == AuthStatus.unauthenticated;
@@ -78,17 +70,47 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final AuthService _authService;
   StreamSubscription<User?>? _authSubscription;
 
+  // FIX: This flag is the key to preventing race conditions.
+  //
+  // The root cause of "stuck" states on both web and mobile:
+  // During signIn() / signUp() / signOut(), we're manually managing state
+  // (loading → authenticated / error). But the Firebase stream ALSO fires
+  // during these exact moments, and the two state updates fight each other.
+  //
+  // Example race on mobile second-logout:
+  //   1. signIn() sets state = loading
+  //   2. Firebase signs in the user
+  //   3. Stream fires → sets state = authenticated (step A)
+  //   4. signIn() backfill logic runs → sets state = authenticated (step B)
+  //   5. ref.listen fires TWICE — navigates twice — GoRouter gets confused
+  //
+  // Solution: _isBusy = true during auth operations → stream stays quiet.
+  // _isBusy = false when the operation is done → stream resumes normally.
+  bool _isBusy = false;
+
   AuthNotifier(this._authService) : super(const AuthState()) {
     _init();
   }
 
-  // ── Listen to Firebase auth stream on startup ──────────────────────────
-  // Inside AuthNotifier in auth_provider.dart
   void _init() {
     state = state.copyWith(status: AuthStatus.loading);
 
-    // Switch from authStateChanges() to userChanges()
-    _authSubscription = FirebaseAuth.instance.userChanges().listen((user) {
+    // FIX: Use authStateChanges() instead of userChanges().
+    //
+    // userChanges() fires for EVERY user property change, including when
+    // reload() is called mid-polling. This means every 3-second poll in
+    // VerifyEmailScreen triggered the stream, which could temporarily reset
+    // the state to emailUnverified DURING the exact moment reloadUser() was
+    // about to set it to authenticated.
+    //
+    // authStateChanges() only fires on actual sign-in and sign-out events.
+    // This means reload() calls are SILENT to the stream — only reloadUser()
+    // handles the email verification state update, with no race condition.
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      // Respect the busy flag: if an auth operation is in progress,
+      // it will set the state itself when it completes.
+      if (_isBusy) return;
+
       if (user == null) {
         state = const AuthState(status: AuthStatus.unauthenticated);
       } else if (!user.emailVerified) {
@@ -99,8 +121,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
     });
   }
 
-  // ── Sign In with Email ─────────────────────────────────────────────────
+  // ── Sign In ────────────────────────────────────────────────────────────
   Future<bool> signIn({required String email, required String password}) async {
+    _isBusy = true;
     state = state.copyWith(status: AuthStatus.loading, clearError: true);
 
     try {
@@ -111,55 +134,86 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final user = credential.user;
 
       if (user != null && !user.emailVerified) {
-        // Logic for "Redirect to verify screen even after closing app"
         state = AuthState(status: AuthStatus.emailUnverified, user: user);
-        return false; // Returns false to tell the UI to show a message or redirect
+        _isBusy = false;
+        return false;
+      }
+
+      // ── BACKFILL displayName for existing email/password users ─────────
+      if (user != null &&
+          (user.displayName == null || user.displayName!.trim().isEmpty)) {
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          final storedName = doc.data()?['name'] as String?;
+          if (storedName != null && storedName.trim().isNotEmpty) {
+            await user.updateDisplayName(storedName.trim());
+            await user.reload();
+            final refreshed = FirebaseAuth.instance.currentUser;
+            state = AuthState(
+              status: AuthStatus.authenticated,
+              user: refreshed ?? user,
+            );
+            _isBusy = false;
+            return true;
+          }
+        } catch (_) {
+          // Backfill is non-critical — never block login if it fails
+        }
       }
 
       state = AuthState(status: AuthStatus.authenticated, user: user);
+      _isBusy = false;
       return true;
     } on FirebaseAuthException catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
         errorMessage: _mapFirebaseError(e.code),
       );
+      _isBusy = false;
+      return false;
+    } catch (e) {
+      state = state.copyWith(
+        status: AuthStatus.unauthenticated,
+        errorMessage: 'Something went wrong. Please try again.',
+      );
+      _isBusy = false;
       return false;
     }
   }
 
-  // ── Sign Up with Email ─────────────────────────────────────────────────
-  // Inside AuthNotifier class in auth_provider.dart
+  // ── Sign Up ────────────────────────────────────────────────────────────
   Future<bool> signUp({
     required String name,
     required String email,
     required String password,
   }) async {
+    _isBusy = true;
     state = state.copyWith(status: AuthStatus.loading, clearError: true);
 
     try {
-      final credential = await _authService.signUp(
-        name: name,
-        email: email,
-        password: password,
-      );
+      await _authService.signUp(name: name, email: email, password: password);
 
-      final user = credential.user;
+      final refreshedUser = FirebaseAuth.instance.currentUser;
 
-      if (user == null) {
+      if (refreshedUser == null) {
         state = state.copyWith(
           status: AuthStatus.unauthenticated,
           errorMessage: 'Sign up failed. Please try again.',
         );
+        _isBusy = false;
         return false;
       }
 
-      // REMOVED: await user.sendEmailVerification();
-      // It is already handled inside _authService.signUp!
-
-      state = AuthState(status: AuthStatus.emailUnverified, user: user);
+      state = AuthState(
+        status: AuthStatus.emailUnverified,
+        user: refreshedUser,
+      );
+      _isBusy = false;
       return true;
     } on FirebaseAuthException catch (e) {
-      // SPECIAL CASE: If they try to sign up with an existing but unverified email
       if (e.code == 'email-already-in-use') {
         state = state.copyWith(
           status: AuthStatus.unauthenticated,
@@ -171,26 +225,34 @@ class AuthNotifier extends StateNotifier<AuthState> {
           errorMessage: _mapFirebaseError(e.code),
         );
       }
+      _isBusy = false;
       return false;
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
         errorMessage: 'Something went wrong.',
       );
+      _isBusy = false;
       return false;
     }
   }
 
   // ── Google Sign In ─────────────────────────────────────────────────────
   Future<bool> signInWithGoogle() async {
+    _isBusy = true;
     state = state.copyWith(status: AuthStatus.loading, clearError: true);
 
     try {
       final credential = await _authService.signInWithGoogle();
 
       if (credential == null) {
-        // User cancelled the Google picker — not an error
-        state = state.copyWith(status: AuthStatus.unauthenticated);
+        // User cancelled the Google picker — go back to unauthenticated
+        // without an error message (it's not an error, user just cancelled).
+        state = state.copyWith(
+          status: AuthStatus.unauthenticated,
+          clearError: true,
+        );
+        _isBusy = false;
         return false;
       }
 
@@ -201,23 +263,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
           status: AuthStatus.unauthenticated,
           errorMessage: 'Google sign in failed. Please try again.',
         );
+        _isBusy = false;
         return false;
       }
 
-      // Google accounts are pre-verified
       state = AuthState(status: AuthStatus.authenticated, user: user);
+      _isBusy = false;
       return true;
     } on FirebaseAuthException catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
         errorMessage: _mapFirebaseError(e.code),
       );
+      _isBusy = false;
       return false;
     } catch (e) {
       state = state.copyWith(
         status: AuthStatus.unauthenticated,
-        errorMessage: 'Google sign in failed: ${e.toString()}',
+        errorMessage: 'Google sign in failed. Please try again.',
       );
+      _isBusy = false;
       return false;
     }
   }
@@ -225,44 +290,76 @@ class AuthNotifier extends StateNotifier<AuthState> {
   // ── Resend Verification Email ──────────────────────────────────────────
   Future<void> resendVerificationEmail() async {
     try {
-      await state.user?.sendEmailVerification();
-    } catch (_) {
-      // Silently fail — the VerifyEmailScreen handles its own timer UI
-    }
+      // Always use FirebaseAuth.instance.currentUser, not state.user.
+      // state.user is a snapshot that can be stale on web.
+      await FirebaseAuth.instance.currentUser?.sendEmailVerification();
+    } catch (_) {}
   }
 
-  // ── Reload user to check if email was verified ─────────────────────────
+  // ── Reload User (called by VerifyEmailScreen polling) ─────────────────
   Future<void> reloadUser() async {
+    // FIX 1: Always use FirebaseAuth.instance.currentUser?.reload(), NOT
+    // state.user?.reload().
+    //
+    // state.user is the user object at the time it was last stored in
+    // Riverpod state. On Flutter Web, the Firebase JS SDK can let this
+    // reference go stale between polling calls. Calling reload() on a
+    // stale reference either silently does nothing or throws an error
+    // that the old catch(_){} block was hiding.
+    //
+    // FirebaseAuth.instance.currentUser is ALWAYS the live singleton —
+    // guaranteed fresh by the Firebase SDK on every access.
+    //
+    // FIX 2: No _isBusy flag here — reloadUser() is called from the
+    // VerifyEmailScreen timer. We WANT the state to update when the user
+    // verifies their email. But since we switched to authStateChanges()
+    // in _init(), reload() no longer triggers the stream at all.
+    // reloadUser() is now the SOLE mechanism for email verification
+    // detection — clean, no race condition.
     try {
-      await state.user?.reload();
-      final refreshed = FirebaseAuth.instance.currentUser;
+      await FirebaseAuth.instance.currentUser?.reload();
 
+      final refreshed = FirebaseAuth.instance.currentUser;
       if (refreshed != null && refreshed.emailVerified) {
         state = AuthState(status: AuthStatus.authenticated, user: refreshed);
       }
-    } catch (_) {}
+    } catch (e) {
+      // FIX 3: Log the error instead of swallowing it silently.
+      // The old catch (_) {} hid reload() failures on web (e.g. token
+      // expired mid-verification, network blip), making the screen appear
+      // "stuck" with no indication of what went wrong.
+      debugPrint('[AuthNotifier] reloadUser error: $e');
+      // Don't rethrow — a failed reload is not fatal. The next poll
+      // (3 seconds later) will try again.
+    }
   }
 
   // ── Sign Out ───────────────────────────────────────────────────────────
   Future<void> signOut() async {
+    // Don't set _isBusy here — we WANT the stream to pick up the
+    // sign-out event and set state to unauthenticated automatically.
+    // We just call the service and let the authStateChanges() stream
+    // handle the state update.
     try {
       await _authService.logout();
-      // Force the state to unauthenticated immediately
+      // Belt-and-suspenders: set state immediately so the UI reacts
+      // without waiting for the stream event (which is near-instant
+      // but adds a tiny delay on web).
       state = const AuthState(status: AuthStatus.unauthenticated);
     } catch (e) {
-      state = AuthState(
-        status: AuthStatus.unauthenticated,
-        errorMessage: e.toString(),
-      );
+      // Even if logout throws, force unauthenticated state so the user
+      // can at least get back to the login screen.
+      state = const AuthState(status: AuthStatus.unauthenticated);
+      debugPrint('[AuthNotifier] signOut error: $e');
     }
   }
 
-  // ── Clear any error manually (e.g. when user starts typing again) ──────
+  // ── Clear Error ────────────────────────────────────────────────────────
   void clearError() {
     state = state.copyWith(clearError: true);
   }
 
-  // ── Firebase error code → human readable ──────────────────────────────
+  // ── Firebase Error Mapping ─────────────────────────────────────────────
   String _mapFirebaseError(String code) {
     switch (code) {
       case 'user-not-found':
@@ -285,6 +382,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return 'No internet connection. Please check your network.';
       case 'operation-not-allowed':
         return 'This sign-in method is not enabled.';
+      case 'popup-blocked':
+        return 'Google sign-in popup was blocked. Please allow popups for this site.';
+      case 'popup-closed-by-user':
+        return 'Sign-in cancelled. Please try again.';
       default:
         return 'Something went wrong (code: $code).';
     }
@@ -301,42 +402,125 @@ class AuthNotifier extends StateNotifier<AuthState> {
 // PROVIDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// The AuthService instance — single shared instance across the app
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 
-/// The main auth provider — watch this anywhere you need auth state
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   return AuthNotifier(ref.watch(authServiceProvider));
 });
 
-/// Convenience provider — just the current Firebase user (or null)
 final currentUserProvider = Provider<User?>((ref) {
   return ref.watch(authProvider).user;
 });
 
-/// Convenience provider — just the auth status
 final authStatusProvider = Provider<AuthStatus>((ref) {
   return ref.watch(authProvider).status;
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH GATE — checks Firestore to decide HomeScreen vs TestSelectionScreen
+// ─────────────────────────────────────────────────────────────────────────────
+
+class AuthGateScreen extends ConsumerWidget {
+  const AuthGateScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
+
+    if (user == null) return const LoginScreen();
+
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Scaffold(
+            body: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF0A0E2E),
+                    Color(0xFF1A1464),
+                    Color(0xFF6C63FF),
+                  ],
+                  stops: [0.0, 0.5, 1.0],
+                ),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) return const HomeScreen();
+
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+
+        // FIX: Align field check with what TestSelectionScreen actually writes.
+        // LoginScreen was checking 'selectedTests' but AuthGateScreen was checking
+        // 'testType'. Pick ONE field name and use it consistently everywhere.
+        // Check both during the transition period so existing users are not
+        // accidentally sent back to TestSelection.
+        final hasTestType =
+            data != null &&
+            (data['testType'] != null || data['selectedTests'] != null);
+
+        return hasTestType ? const HomeScreen() : const TestSelectionScreen();
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH WRAPPER — top-level router in MaterialApp home:
+// ─────────────────────────────────────────────────────────────────────────────
 
 class AuthWrapper extends ConsumerWidget {
   const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // This watches the auth state in real-time
     final authState = ref.watch(authProvider);
 
-    // Depending on the status, it returns a DIFFERENT screen
     switch (authState.status) {
       case AuthStatus.authenticated:
-        return const TestSelectionScreen();
+        return const AuthGateScreen();
+
       case AuthStatus.emailUnverified:
         return const VerifyEmailScreen();
+
       case AuthStatus.loading:
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      case AuthStatus.unauthenticated:
       case AuthStatus.initial:
+        return Scaffold(
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0A0E2E),
+                  Color(0xFF1A1464),
+                  Color(0xFF6C63FF),
+                ],
+                stops: [0.0, 0.5, 1.0],
+              ),
+            ),
+            child: const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+          ),
+        );
+
+      case AuthStatus.unauthenticated:
       default:
         return const LoginScreen();
     }
