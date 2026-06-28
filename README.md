@@ -34,11 +34,11 @@ Ustaad solves this. Practice MCQs from real past papers, get instant AI explanat
 
 | Splash | Home | Quiz | Explanation |
 |--------|------|------|-------------|
-| ![splash](#) | ![home](#) | ![quiz](#) | ![explanation](#) |
+| ![splash](screenshots/splash.jpeg) | ![home](screenshots/home.jpeg) | ![quiz](screenshots/quiz.jpeg) | ![explanation](screenshots/explanation.jpeg) |
 
 | Results | Progress | Papers | Profile |
 |---------|----------|--------|---------|
-| ![results](#) | ![progress](#) | ![papers](#) | ![profile](#) |
+| ![results](screenshots/result.jpeg) | ![progress](screenshots/progress.jpeg) | ![papers](screenshots/papers.jpeg) | ![profile](screenshots/profile.jpeg) |
 
 ---
 
@@ -159,6 +159,7 @@ lib/
 ✅ ProfileScreen         Settings, test change, logout, privacy policy
 ✅ PapersScreen          Browse past papers by year and subject
 ✅ PaperDetailScreen     Question list for a selected paper
+✅ FeedbackScreen        Users can submit their Feedbacks
 ```
 
 ---
@@ -259,7 +260,7 @@ flutter run
 - [x] Skeleton loading UI
 - [x] Push notifications (FCM)
 - [x] Exam countdown (FAST-NU / NUST-NET hardcoded dates)
-- [ ] Mock paper mode (full timed simulation)
+- [x] Mock paper mode (full timed simulation)
 - [ ] Custom test builder
 - [ ] Payment integration (JazzCash / EasyPaisa)
 - [ ] Leaderboard
@@ -272,7 +273,7 @@ flutter run
 ## About the Developer
 
 **Burhan Khan** — Flutter Developer, Lahore, Pakistan  
-Self-taught. Started Flutter in February 2025. Shipped Ustaad to real users in 4 months.
+Self-taught. Started Flutter in February 2026. Shipped Ustaad to real users in 4 months.
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Burhan%20Khan-0A66C2?logo=linkedin)](https://linkedin.com/in/burhan-khan)
 [![GitHub](https://img.shields.io/badge/GitHub-mburhankhan101--glitch-181717?logo=github)](https://github.com/mburhankhan101-glitch)
@@ -282,7 +283,7 @@ Self-taught. Started Flutter in February 2025. Shipped Ustaad to real users in 4
 
 ## Privacy & Legal
 
-- [Privacy Policy](https://ustaadapp.online/privacy) — hosted at ustaadapp.online
+- [Privacy Policy](https://ustaad-privacy.vercel.app/) — hosted at ustaadapp.online
 - Built for Pakistani students. Not affiliated with FAST-NU, NUST, or NTS.
 
 ---
