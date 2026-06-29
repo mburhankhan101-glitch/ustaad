@@ -4,7 +4,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:ustaad/providers/credits_provider.dart';
 import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/feedback/feedback_screen.dart';
-import 'package:ustaad/ustu_animation.dart'; // 👈 NEW IMPORT
 import '../../providers/auth_provider.dart';
 import 'package:ustaad/providers/progress_provider.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
@@ -98,24 +97,6 @@ class ProfileScreen extends ConsumerWidget {
                     label: 'Privacy Policy',
                     onTap: () => _launchPrivacyPolicy(context),
                     trailingIcon: Icons.open_in_new_rounded,
-                  ),
-                ]),
-
-                const SizedBox(height: 24),
-
-                // ── Content ──────────────────────────────────────────────────
-                _buildSectionLabel('Content'),
-                const SizedBox(height: 10),
-                _buildMenuCard(context, [
-                  _MenuItem(
-                    icon: Icons.animation,
-                    label: 'Ustu Animation',
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ReelDirectorDashboard(),
-                      ),
-                    ),
                   ),
                 ]),
 
