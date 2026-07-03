@@ -209,7 +209,10 @@ class PaperSessionNotifier
       }
       if (current.sections.isEmpty) return;
 
-      if (type == ExamType.nustNET || type == ExamType.nts) {
+      if (type == ExamType.nustNET ||
+          type == ExamType.nts ||
+          type == ExamType.mdcat ||
+          type == ExamType.numsMdcat) {
         final rem = current.globalSecondsLeft - 1;
         if (rem <= 0) {
           submitPaper();
@@ -305,7 +308,8 @@ class PaperSessionNotifier
   void switchToSection(int sectionIndex) {
     final current = state.value;
     if (current == null || current.isSubmitted) return;
-    if (current.examType != ExamType.nustNET) return;
+    final freeNavExams = {ExamType.nustNET, ExamType.mdcat, ExamType.numsMdcat};
+    if (!freeNavExams.contains(current.examType)) return;
     state = AsyncValue.data(
       current.copyWith(
         currentSectionIndex: sectionIndex,
