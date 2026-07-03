@@ -85,6 +85,12 @@ const _degrees = [
     subtitle: 'BSDS, BSAI, BS Data Engineering',
     icon: Icons.auto_awesome_rounded,
   ),
+  _DegreeOption(
+    id: 'medical',
+    label: 'MBBS / BDS (Medical)',
+    subtitle: 'Doctor of Medicine, Dental Surgery',
+    icon: Icons.medical_services_rounded,
+  ),
 ];
 
 final _tests = [
@@ -188,6 +194,30 @@ final _tests = [
       ],
     },
   ),
+  _TestOption(
+    id: 'MDCAT',
+    shortName: 'MDCAT',
+    fullName: 'Medical & Dental College Admissions Test',
+    description: 'PMC national entry test for MBBS & BDS admissions',
+    icon: Icons.medical_services_rounded,
+    accentColor: const Color(0xFF4CAF50),
+    weightages: {
+      'default': [
+        _Subject('Biology', 0.45),
+        _Subject('Chemistry', 0.25),
+        _Subject('Physics', 0.20),
+        _Subject('English', 0.05),
+        _Subject('Logical Reasoning', 0.05),
+      ],
+      'medical': [
+        _Subject('Biology', 0.45),
+        _Subject('Chemistry', 0.25),
+        _Subject('Physics', 0.20),
+        _Subject('English', 0.05),
+        _Subject('Logical Reasoning', 0.05),
+      ],
+    },
+  ),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +266,28 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
 
   bool get _canContinue =>
       _selectedTestIds.isNotEmpty && _selectedDegreeId != null;
+
+  Widget _buildAnimatedTestCard(int i) {
+    final test = _tests[i];
+    final isSelected = _selectedTestIds.contains(test.id);
+    final subjects = test.subjectsFor(_selectedDegreeId);
+    return SlideTransition(
+      position: _cardSlides[i],
+      child: FadeTransition(
+        opacity: _cardFades[i],
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _TestCard(
+            test: test,
+            isSelected: isSelected,
+            subjects: subjects,
+            showWeightages: _selectedDegreeId != null,
+            onTap: () => _toggleTest(test.id),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -641,39 +693,26 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
 
                             const SizedBox(height: 28),
 
-                            // ── Test cards ───────────────────────────
+                            // ── Engineering & CS section ──────────────
                             _SectionLabel(
-                              label: 'Entry Tests',
+                              label: '🎓 Engineering & CS',
                               note: 'Select all that apply',
                             ),
                             const SizedBox(height: 10),
 
-                            ...List.generate(_tests.length, (i) {
-                              final test = _tests[i];
-                              final isSelected = _selectedTestIds.contains(
-                                test.id,
-                              );
-                              final subjects = test.subjectsFor(
-                                _selectedDegreeId,
-                              );
+                            // FAST-NU (0), NUST-NET (1), NAT-NTS (2)
+                            _buildAnimatedTestCard(0),
+                            _buildAnimatedTestCard(1),
+                            _buildAnimatedTestCard(2),
 
-                              return SlideTransition(
-                                position: _cardSlides[i],
-                                child: FadeTransition(
-                                  opacity: _cardFades[i],
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(bottom: 14),
-                                    child: _TestCard(
-                                      test: test,
-                                      isSelected: isSelected,
-                                      subjects: subjects,
-                                      showWeightages: _selectedDegreeId != null,
-                                      onTap: () => _toggleTest(test.id),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }),
+                            const SizedBox(height: 4),
+
+                            // ── Medical section ───────────────────────
+                            _SectionLabel(label: '🏥 Medical'),
+                            const SizedBox(height: 10),
+
+                            // MDCAT (3)
+                            _buildAnimatedTestCard(3),
 
                             const SizedBox(height: 8),
                           ],
