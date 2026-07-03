@@ -16,9 +16,18 @@ import 'package:ustaad/providers/paper_provder.dart';
 import 'package:ustaad/screens/papers/fast_paper_screen.dart';
 import 'package:ustaad/screens/papers/nts_paper_screen.dart';
 import 'package:ustaad/screens/papers/nust_paper_screen.dart';
+import 'package:ustaad/screens/papers/medical_paper_screen.dart';
 
 // ─── What the user picked on TestSelectionScreen ──────────────────────────────
-enum UserProgram { fastCS, fastBusiness, nustEngineering, nustBusiness, ntsCS }
+enum UserProgram {
+  fastCS,
+  fastBusiness,
+  nustEngineering,
+  nustBusiness,
+  ntsCS,
+  mdcatMedical,
+  numsMedical,
+}
 
 class ProgramSelectionScreen extends ConsumerWidget {
   final ExamType examType;
@@ -39,6 +48,10 @@ class ProgramSelectionScreen extends ConsumerWidget {
         return const Color(0xFF4CAF50);
       case ExamType.nts:
         return const Color(0xFFFF6B6B);
+      case ExamType.mdcat:
+        return const Color(0xFF00BFA5);
+      case ExamType.numsMdcat:
+        return const Color(0xFF2196F3);
     }
   }
 
@@ -50,6 +63,10 @@ class ProgramSelectionScreen extends ConsumerWidget {
         return const Color(0xFF81C784);
       case ExamType.nts:
         return const Color(0xFFFF9999);
+      case ExamType.mdcat:
+        return const Color(0xFF64FFDA);
+      case ExamType.numsMdcat:
+        return const Color(0xFF90CAF9);
     }
   }
 
@@ -61,6 +78,10 @@ class ProgramSelectionScreen extends ConsumerWidget {
         return 'NUST-NET';
       case ExamType.nts:
         return 'NTS';
+      case ExamType.mdcat:
+        return 'MDCAT';
+      case ExamType.numsMdcat:
+        return 'NUMS';
     }
   }
 
@@ -161,6 +182,48 @@ class ProgramSelectionScreen extends ConsumerWidget {
           totalMCQs: 90,
           totalTime: '100 min',
           totalMarks: '100',
+          hasNegative: false,
+        );
+
+      case UserProgram.mdcatMedical:
+        return _ProgramInfo(
+          label: 'MBBS / BDS — National MDCAT',
+          subtitle: 'Pakistan Medical & Dental Council',
+          sections: const [
+            _SectionTag('81 Biology'),
+            _SectionTag('45 Chemistry'),
+            _SectionTag('36 Physics'),
+            _SectionTag('9 English'),
+            _SectionTag('9 Logical Reasoning'),
+          ],
+          markingLines: const [
+            '+1 for every correct answer',
+            'No negative marking',
+          ],
+          totalMCQs: 180,
+          totalTime: '180 min',
+          totalMarks: '180',
+          hasNegative: false,
+        );
+
+      case UserProgram.numsMedical:
+        return _ProgramInfo(
+          label: 'MBBS / BDS — NUMS',
+          subtitle: 'National University of Medical Sciences · Paper-I',
+          sections: const [
+            _SectionTag('55 Biology'),
+            _SectionTag('40 Chemistry'),
+            _SectionTag('40 Physics'),
+            _SectionTag('15 English'),
+          ],
+          markingLines: const [
+            '+1 for every correct answer',
+            'No negative marking',
+            'Paper-II (Psychological Test) not included in this mock',
+          ],
+          totalMCQs: 150,
+          totalTime: '165 min',
+          totalMarks: '150',
           hasNegative: false,
         );
     }
@@ -569,6 +632,14 @@ class ProgramSelectionScreen extends ConsumerWidget {
                   ? 'Exam Mode: One global timer of 100 min. '
                         'Sections appear in order: English → Analytical → Quantitative → CS. '
                         'Paper auto-submits when time is up.'
+                  : examType == ExamType.mdcat
+                  ? 'Exam Mode: One global timer of 180 min. '
+                        'You can freely move between all sections at any time. '
+                        'Paper auto-submits when time is up.'
+                  : examType == ExamType.numsMdcat
+                  ? 'Exam Mode: One global timer of 165 min (2h45m). '
+                        'You can freely move between all sections at any time. '
+                        'Paper auto-submits when time is up.'
                   : 'Exam Mode: Sections are randomised. Each section has its own timer. '
                         'You cannot return to a previous section once you move forward. '
                         'Paper auto-submits when time is up.',
@@ -630,6 +701,12 @@ class ProgramSelectionScreen extends ConsumerWidget {
         break;
       case ExamType.nts:
         screen = NtsPaperScreen(examType: examType);
+        break;
+      case ExamType.mdcat:
+        screen = MdcatPaperScreen(examType: examType);
+        break;
+      case ExamType.numsMdcat:
+        screen = NumsPaperScreen(examType: examType);
         break;
     }
 

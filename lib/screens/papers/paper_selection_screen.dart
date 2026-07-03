@@ -43,10 +43,12 @@ class PaperSelectionScreen extends StatelessWidget {
             : SafeArea(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 8,
-                  ),
+                  // Extra bottom padding (not just vertical: 8) because the
+                  // bottom nav bar sits as an overlay outside this screen's
+                  // own SafeArea — Flutter doesn't know to reserve space for
+                  // it, so without this the last card gets clipped and the
+                  // scroll view stops short of fully revealing it.
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 100),
                   child: _buildMobileContent(context),
                 ),
               ),
@@ -89,6 +91,10 @@ class PaperSelectionScreen extends StatelessWidget {
             _buildPaperCard(context, nustPaperCard(context)),
             const SizedBox(height: 16),
             _buildPaperCard(context, ntsPaperCard(context)),
+            const SizedBox(height: 16),
+            _buildPaperCard(context, mdcatPaperCard(context)),
+            const SizedBox(height: 16),
+            _buildPaperCard(context, numsPaperCard(context)),
             const SizedBox(height: 40),
           ],
         ),
@@ -128,6 +134,19 @@ class PaperSelectionScreen extends StatelessWidget {
             Expanded(child: _buildPaperCard(context, nustPaperCard(context))),
             const SizedBox(width: 20),
             Expanded(child: _buildPaperCard(context, ntsPaperCard(context))),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _buildPaperCard(context, mdcatPaperCard(context))),
+            const SizedBox(width: 20),
+            Expanded(child: _buildPaperCard(context, numsPaperCard(context))),
+            const SizedBox(width: 20),
+            const Expanded(
+              child: SizedBox(),
+            ), // keeps card width consistent with row above
           ],
         ),
         const SizedBox(height: 40),
@@ -185,6 +204,48 @@ class PaperSelectionScreen extends StatelessWidget {
         builder: (_) => const ProgramSelectionScreen(
           examType: ExamType.nts,
           userProgram: UserProgram.ntsCS,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData mdcatPaperCard(BuildContext context) => _PaperCardData(
+    title: 'MDCAT (Medical/Dental)',
+    duration: '180 mins',
+    marks: '180 marks',
+    tags: const [
+      '81 Biology',
+      '45 Chemistry',
+      '36 Physics',
+      '9 English',
+      '9 Logical Reasoning',
+    ],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF00BFA5),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.mdcat,
+          userProgram: UserProgram.mdcatMedical,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData numsPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NUMS MDCAT (Paper-I)',
+    duration: '165 mins',
+    marks: '150 marks',
+    tags: const ['55 Biology', '40 Chemistry', '40 Physics', '15 English'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF2196F3),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.numsMdcat,
+          userProgram: UserProgram.numsMedical,
         ),
       ),
     ),
