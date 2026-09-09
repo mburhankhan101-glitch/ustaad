@@ -220,6 +220,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   int _selectedNav = 0;
 
   String? _cachedGreeting;
+  String? _greetingForName;
   bool _weakTopicShown = false;
   bool _brokenStreakShown = false;
   List<String> _cachedSelectedTests =
@@ -321,21 +322,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return name.trim().split(' ').first;
   }
 
-  /// The time-of-day greeting, cached so it does not reshuffle on every
-  /// rebuild — but never caching the placeholder.
+  /// The time-of-day greeting, cached against the name it was built for.
   ///
-  /// displayName is null for the first frame or two after a cold start, so
-  /// _firstName() returns 'Student' then. The previous version cached that and
-  /// never recovered: its guard did let a real name through, but the `??=`
-  /// underneath refused to overwrite what was already stored, so the greeting
-  /// stayed "Good Morning, Student" for the whole session. Now nothing is
-  /// cached until a real name exists, and it is computed live until then.
+  /// getGreeting() picks at random from a pool, so it must be called once per
+  /// name and never again — every extra call returns a different line.
+  ///
+  /// The previous version keyed off the 'Student' placeholder instead: it
+  /// refused to cache until a real name arrived, on the assumption that
+  /// displayName is null only for a frame or two after a cold start. For a
+  /// guest, displayName is null for the entire session, so the cache never
+  /// populated and the fallback re-randomised the greeting on every single
+  /// rebuild. Different lines are different lengths, so the text rewrapped and
+  /// the whole header jumped — the home screen visibly shook.
+  ///
+  /// Keying on the name fixes both cases: stable for a guest, and recomputed
+  /// exactly once when the placeholder is replaced by a real name after
+  /// signing in.
   String get _greetingLine {
     final name = _firstName();
-    if (name != 'Student') {
-      _cachedGreeting ??= getGreeting(name);
+    if (_greetingForName != name) {
+      _greetingForName = name;
+      _cachedGreeting = getGreeting(name);
     }
-    return _cachedGreeting ?? getGreeting(name);
+    return _cachedGreeting!;
   }
 
   String _initials() {
