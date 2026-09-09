@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/models/question_model.dart';
 import 'package:ustaad/providers/credits_provider.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
@@ -51,6 +52,15 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
   @override
   void initState() {
     super.initState();
+
+    // The retention signal. Explanations are pre-generated in Firestore, so
+    // they cost nothing to serve and are the reason students come back — this
+    // is the number to watch before deciding what to put behind a paywall.
+    Analytics.instance.explanationOpened(
+      exam: widget.question.exam,
+      language: _isUrdu ? 'ur' : 'en',
+    );
+
     _setupAnimations();
     _staggerCtrl.forward();
     // Credit check runs once on open. Language toggle never re-charges.

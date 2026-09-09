@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/svg.dart';
+import 'package:ustaad/core/notifications/push_service.dart';
+import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/papers/paper_selection_screen.dart';
 import 'package:ustaad/screens/quiz/quiz_screen.dart';
 import 'package:ustaad/screens/profile/profile_screen.dart';
@@ -130,16 +132,64 @@ const _ntsSections = [
   ),
 ];
 
+const _mdcatSections = [
+  QuizSection(
+    emoji: '🧬',
+    title: 'Biology',
+    dbSection: 'Biology',
+    weightLabel: '45% of MDCAT',
+    barColor: UstaadColors.success,
+  ),
+  QuizSection(
+    emoji: '⚗️',
+    title: 'Chemistry',
+    dbSection: 'Chemistry',
+    weightLabel: '25% of MDCAT',
+    barColor: Color(0xFF00BCD4),
+  ),
+  QuizSection(
+    emoji: '⚡',
+    title: 'Physics',
+    dbSection: 'Physics',
+    weightLabel: '20% of MDCAT',
+    barColor: UstaadColors.accent,
+  ),
+  QuizSection(
+    emoji: '📝',
+    title: 'English',
+    dbSection: 'English',
+    weightLabel: '5% of MDCAT',
+    barColor: UstaadColors.primary,
+  ),
+  QuizSection(
+    emoji: '🧩',
+    title: 'Logical Reasoning',
+    dbSection: 'Logical Reasoning',
+    weightLabel: '5% of MDCAT',
+    barColor: UstaadColors.gold,
+  ),
+];
+
 class ExamTab {
+  /// [id] matches the value stored in Firestore's selectedTests field.
+  /// [label] is the display name shown on the tab chip AND used as the
+  /// prefix for Firestore question keys (e.g. 'NTS_English').
+  /// These are different for NTS: id='NAT-NTS', label='NTS'.
+  final String id;
   final String label;
   final List<QuizSection> sections;
-  const ExamTab({required this.label, required this.sections});
+  const ExamTab({
+    required this.id,
+    required this.label,
+    required this.sections,
+  });
 }
 
 const _examTabs = [
-  ExamTab(label: 'FAST-NU', sections: _fastNuSections),
-  ExamTab(label: 'NUST-NET', sections: _nustNetSections),
-  ExamTab(label: 'NTS', sections: _ntsSections),
+  ExamTab(id: 'FAST-NU', label: 'FAST-NU', sections: _fastNuSections),
+  ExamTab(id: 'NUST-NET', label: 'NUST-NET', sections: _nustNetSections),
+  ExamTab(id: 'NAT-NTS', label: 'NTS', sections: _ntsSections),
+  ExamTab(id: 'MDCAT', label: 'MDCAT', sections: _mdcatSections),
 ];
 
 class _NavItem {
@@ -172,6 +222,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   String? _cachedGreeting;
   bool _weakTopicShown = false;
   bool _brokenStreakShown = false;
+  List<String> _cachedSelectedTests =
+      []; // cached so _showQuizPicker can filter tabs
+
+  // ── Streak-increase celebration (stream-diff based — see _openQuiz note) ──
+  int? _lastKnownStreak;
+  int? _pendingStreakCelebration;
 
   AnimationController? _entranceCtrl;
   Animation<double>? _headerAnim;
@@ -213,6 +269,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       vsync: this,
     );
     _setupEntranceAnims();
+
+    // Topic subscription happens on the exam-selection screen, which existing
+    // users have already passed through and may never revisit. Without this
+    // backfill they would stay unsubscribed and a broadcast would only ever
+    // reach accounts created after this release.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final exams = await ref.read(selectedTestsProvider.future);
+      if (exams.isNotEmpty) PushService.instance.syncTopics(exams);
+    });
   }
 
   void _setupEntranceAnims() {
@@ -256,6 +321,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return name.trim().split(' ').first;
   }
 
+  /// The time-of-day greeting, cached so it does not reshuffle on every
+  /// rebuild — but never caching the placeholder.
+  ///
+  /// displayName is null for the first frame or two after a cold start, so
+  /// _firstName() returns 'Student' then. The previous version cached that and
+  /// never recovered: its guard did let a real name through, but the `??=`
+  /// underneath refused to overwrite what was already stored, so the greeting
+  /// stayed "Good Morning, Student" for the whole session. Now nothing is
+  /// cached until a real name exists, and it is computed live until then.
+  String get _greetingLine {
+    final name = _firstName();
+    if (name != 'Student') {
+      _cachedGreeting ??= getGreeting(name);
+    }
+    return _cachedGreeting ?? getGreeting(name);
+  }
+
   String _initials() {
     final name = ref.watch(currentUserProvider);
     if (name == null || name.trim().isEmpty) return 'ST';
@@ -292,7 +374,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
         transitionDuration: const Duration(milliseconds: 420),
       ),
-    ).then((_) => setState(() => _selectedNav = 0));
+    ).then((_) {
+      // Streak-increase celebration is handled in build() via a stream-diff
+      // on userProgressProvider, NOT here. QuizScreen navigates to
+      // ResultScreen via Navigator.pushReplacement, which resolves this
+      // future immediately (with null) the moment the quiz finishes — well
+      // before the user actually returns from the results screen. So this
+      // callback can't reliably know whether the streak went up.
+      setState(() => _selectedNav = 0);
+    });
   }
 
   String _todayString() {
@@ -385,10 +475,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         final double accuracy =
             (progressData?['accuracy'] as num?)?.toDouble() ?? 0.0;
         final bool isNewUser = progressData == null;
+
+        // ── Streak increase → celebrate with the progress map ─────────────
+        // Deliberately NOT driven by QuizScreen's navigation result: it uses
+        // Navigator.pushReplacement to ResultScreen, which resolves Home's
+        // original push future immediately (with null) the moment the quiz
+        // finishes — long before the user actually leaves the results
+        // screen. Watching the streak value itself sidesteps that entirely
+        // and works regardless of how many screens the flow goes through.
+        if (_lastKnownStreak == null) {
+          _lastKnownStreak =
+              streak; // first emission this session — baseline only
+        } else if (streak > _lastKnownStreak!) {
+          _pendingStreakCelebration = streak;
+          _lastKnownStreak = streak;
+        }
+        if (_pendingStreakCelebration != null) {
+          // Only fire while Home is the visible route — if QuizScreen/
+          // ResultScreen is still covering it (e.g. the Firestore write
+          // landed early), defer until Home is current again.
+          final bool isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
+          if (isCurrentRoute) {
+            final celebrateStreak = _pendingStreakCelebration!;
+            _pendingStreakCelebration = null;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                UstuOverlays.showStreakProgressMap(
+                  context,
+                  currentStreak: celebrateStreak,
+                  isCatchUp: false, // slow, one-step "you just earned this"
+                );
+              }
+            });
+          }
+        }
         final Map<String, dynamic> sectionMap =
             progressData?['progress'] as Map<String, dynamic>? ?? {};
         final incompleteSession =
             progressData?['incompleteSession'] as Map<String, dynamic>?;
+
+        // ── Selected tests (for tab filtering) ──────────────────────────
+        final selectedTests =
+            (progressData?['selectedTests'] as List?)?.cast<String>() ?? [];
+        // Cache so _showQuizPicker (which lives outside build's data scope) can use it
+        if (_cachedSelectedTests != selectedTests) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _cachedSelectedTests = selectedTests);
+          });
+        }
 
         // ── Weak topics ──────────────────────────────────────────────────
         final weakTopics = progressData?['weakTopics'] as Map<String, dynamic>?;
@@ -467,10 +601,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           }
         }
 
-        final name = _firstName();
-        if (_cachedGreeting == null || name != 'Student') {
-          _cachedGreeting ??= getGreeting(name);
-        }
+        // Greeting is resolved lazily by _greetingLine at each call site.
 
         if (!_entrancePlayed) {
           _entrancePlayed = true;
@@ -533,7 +664,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ],
                                   _FadeSlide(
                                     animation: _quizAnim ?? _noAnim,
-                                    child: _buildQuizSection(sectionMap),
+                                    child: _buildQuizSection(
+                                      sectionMap,
+                                      selectedTests,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -600,7 +734,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ],
                             _FadeSlide(
                               animation: _quizAnim ?? _noAnim,
-                              child: _buildQuizSection(sectionMap),
+                              child: _buildQuizSection(
+                                sectionMap,
+                                selectedTests,
+                              ),
                             ),
                             const SizedBox(height: 24),
                           ],
@@ -829,7 +966,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                _cachedGreeting ?? 'Your Ustaad is ready 📚',
+                _greetingLine,
                 style: TextStyle(
                   fontFamily: 'Poppins',
                   color: Colors.white.withOpacity(0.5),
@@ -1136,7 +1273,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _cachedGreeting ?? 'Your Ustaad is ready 📚',
+                  _greetingLine,
                   style: const TextStyle(
                     fontFamily: 'Poppins',
                     color: Colors.white54,
@@ -1193,67 +1330,87 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ? UstaadColors.accent.withOpacity(0.30)
         : UstaadColors.gold.withOpacity(0.28);
 
+    final bool canOpenMap = !isNewUser && streak > 0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor),
-        ),
-        child: Row(
-          children: [
-            Text(
-              msg.isRoast ? '💀' : '🔥',
-              style: const TextStyle(fontSize: 28),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        streak.toString(),
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          color: msgColor,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          height: 1,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'day streak',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          color: msgColor.withOpacity(0.55),
-                          fontSize: 10,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '${msg.emoji}  ${msg.text}',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      color: msgColor.withOpacity(0.85),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (!canOpenMap) return;
+          HapticFeedback.lightImpact();
+          UstuOverlays.showStreakProgressMap(
+            context,
+            currentStreak: streak,
+            isCatchUp: true, // tap-to-view replays the full map up to today
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            children: [
+              Text(
+                msg.isRoast ? '💀' : '🔥',
+                style: const TextStyle(fontSize: 28),
               ),
-            ),
-          ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          streak.toString(),
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: msgColor,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'day streak',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: msgColor.withOpacity(0.55),
+                            fontSize: 10,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${msg.emoji}  ${msg.text}',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: msgColor.withOpacity(0.85),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (canOpenMap)
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: msgColor.withOpacity(0.4),
+                  size: 22,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1514,7 +1671,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Widget _buildQuizSection(Map<String, dynamic> sectionMap) {
+  Widget _buildQuizSection(
+    Map<String, dynamic> sectionMap,
+    List<String> selectedTests,
+  ) {
+    // Filter by id (matches Firestore selectedTests), NOT label.
+    // NTS is stored as 'NAT-NTS' in Firestore but displayed as 'NTS'.
+    final visibleTabs = selectedTests.isEmpty
+        ? _examTabs
+        : _examTabs.where((t) => selectedTests.contains(t.id)).toList();
+    final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1536,10 +1703,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 22),
-            itemCount: _examTabs.length,
+            itemCount: visibleTabs.length,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (context, i) {
-              final selected = i == _selectedExam;
+              final selected = i == safeIndex;
               return GestureDetector(
                 onTap: () => setState(() => _selectedExam = i),
                 child: AnimatedContainer(
@@ -1559,7 +1726,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                   ),
                   child: Text(
-                    _examTabs[i].label,
+                    visibleTabs[i].label,
                     style: TextStyle(
                       fontFamily: 'Poppins',
                       color: selected ? Colors.white : Colors.white54,
@@ -1578,10 +1745,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 250),
             child: _buildQuizGrid(
-              _examTabs[_selectedExam].label,
-              _examTabs[_selectedExam].sections,
+              visibleTabs[safeIndex].label,
+              visibleTabs[safeIndex].sections,
               sectionMap,
-              key: ValueKey(_selectedExam),
+              key: ValueKey(safeIndex),
             ),
           ),
         ),
@@ -1785,6 +1952,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _showQuizPicker() {
+    // Use same filtering logic as _buildQuizSection
+    final visibleTabs = _cachedSelectedTests.isEmpty
+        ? _examTabs
+        : _examTabs.where((t) => _cachedSelectedTests.contains(t.id)).toList();
+    final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1827,10 +2000,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 22),
-                    itemCount: _examTabs.length,
+                    itemCount: visibleTabs.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemBuilder: (_, i) {
-                      final selected = i == _selectedExam;
+                      final selected = i == safeIndex;
                       return GestureDetector(
                         onTap: () {
                           setModalState(() => _selectedExam = i);
@@ -1855,7 +2028,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                           child: Text(
-                            _examTabs[i].label,
+                            visibleTabs[i].label,
                             style: TextStyle(
                               fontFamily: 'Poppins',
                               color: selected ? Colors.white : Colors.white54,
@@ -1873,11 +2046,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   child: ListView.separated(
                     shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-                    itemCount: _examTabs[_selectedExam].sections.length,
+                    itemCount: visibleTabs[safeIndex].sections.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, i) {
-                      final s = _examTabs[_selectedExam].sections[i];
-                      final examLabel = _examTabs[_selectedExam].label;
+                      final s = visibleTabs[safeIndex].sections[i];
+                      final examLabel = visibleTabs[safeIndex].label;
                       return GestureDetector(
                         onTap: () {
                           Navigator.pop(context);

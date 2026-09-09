@@ -1,8 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ustaad/core/notifications/push_service.dart';
 import 'package:ustaad/models/question_model.dart';
 import 'package:ustaad/services/firestore_service.dart';
 import 'package:ustaad/providers/progress_provider.dart';
@@ -73,6 +76,28 @@ class _ResultScreenState extends State<ResultScreen>
   late final Animation<double> _s2Anim;
   late final Animation<double> _s3Anim;
 
+  /// Asks for the notification permission here, and only here.
+  ///
+  /// On Android 13+ this is a one-shot system dialog: ask on first launch,
+  /// before the student knows what Ustaad is, and a decline is permanent —
+  /// the only way back is Settings, which nobody visits. Asking on the result
+  /// screen means they have just finished a quiz and a streak reminder is
+  /// obviously worth something.
+  ///
+  /// Guarded by a flag so a student who declines is never nagged again.
+  Future<void> _maybeAskForNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_kAskedForPush) ?? false) return;
+      await prefs.setBool(_kAskedForPush, true);
+      await PushService.instance.requestPermission();
+    } catch (e) {
+      debugPrint('[Result] push permission prompt skipped: $e');
+    }
+  }
+
+  static const _kAskedForPush = 'asked_for_push_permission_v1';
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +109,7 @@ class _ResultScreenState extends State<ResultScreen>
     _computeScore(); // ← initialises all score fields
     _setupAnimations();
     _saveUserProgress();
+    _maybeAskForNotifications();
     HapticFeedback.mediumImpact();
 
     _entranceCtrl.forward();

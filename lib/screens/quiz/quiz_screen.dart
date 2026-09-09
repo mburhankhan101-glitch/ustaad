@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/core/utils/connectivity_service.dart';
 import 'package:ustaad/models/question_model.dart';
 import 'package:ustaad/providers/credits_provider.dart';
@@ -89,6 +90,14 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
   @override
   void initState() {
     super.initState();
+
+    // The activation event. Install to here is what the signup wall and the
+    // email-verification gate are eating, and it has been invisible until now.
+    Analytics.instance.quizStarted(
+      exam: widget.exam,
+      section: widget.section,
+    );
+
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -258,6 +267,20 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
       final poolSize =
           FirestoreService().getPoolSize(widget.exam, widget.section) ??
           _questions.length;
+
+      // Paired with quiz_started, this is the completion rate per section —
+      // the fastest way to spot a section whose questions are too hard, too
+      // long, or broken.
+      var correct = 0;
+      for (var i = 0; i < _questions.length; i++) {
+        if (_userAnswers[i] == _questions[i].correctIndex) correct++;
+      }
+      Analytics.instance.quizFinished(
+        exam: widget.exam,
+        section: widget.section,
+        correct: correct,
+        total: _questions.length,
+      );
 
       Navigator.pushReplacement(
         context,

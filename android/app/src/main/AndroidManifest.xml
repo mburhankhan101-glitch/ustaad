@@ -1,7 +1,29 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13+ requires an explicit runtime grant before any notification
+         can be shown. PushService asks for it after the user has actually seen
+         value in the app, not on first launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Firebase Analytics pulls the advertising ID permissions in through
+         play-services-measurement, even though this app shows no ads, has no
+         ad partners and runs no install campaigns. Left in, they force a
+         "yes" on Play's advertising ID declaration and add a resettable
+         advertising identifier to the data we collect for no benefit.
+
+         Analytics is unaffected: it identifies installs by app instance ID,
+         which is what every event already carries.
+
+         If we ever run Google Ads install campaigns, attribution needs these
+         back — deleting these two lines is all it takes, but it needs a new
+         release. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID"
+        tools:node="remove" />
     <application
-        android:label="ustaad"
+        android:label="Ustaad"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -25,6 +47,13 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- No default_notification_channel_id on purpose. Android 8+ requires
+             the referenced channel to already exist or the notification is
+             dropped without a trace, and creating one needs a local
+             notifications plugin we do not ship yet. Left unset, FCM creates
+             and uses its own fallback channel. Add both together, never the
+             meta-data alone. -->
     </application>
 
     <queries>

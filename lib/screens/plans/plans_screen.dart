@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PlansScreen — Redesigned Paywall
@@ -29,6 +30,11 @@ class _PlansScreenState extends State<PlansScreen>
   @override
   void initState() {
     super.initState();
+
+    // Counts how many people reach the paywall at all. Against quiz_finished
+    // it says whether nobody wants to pay, or nobody is getting this far —
+    // two very different problems with two very different fixes.
+    Analytics.instance.paywallViewed(source: 'plans_screen');
 
     _glowController = AnimationController(
       vsync: this,
