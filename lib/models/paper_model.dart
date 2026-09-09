@@ -367,7 +367,12 @@ class PaperConfigs {
       case ExamType.nustNET:
         return 200.0;
       case ExamType.nts:
-        return 100.0;
+        // NTS NAT is a 90 question paper — 20 English, 20 Analytical,
+        // 20 Quantitative and 30 subject, each worth one mark. This returned
+        // 100, and the result screen renders "N out of ${maxMarks}", so a
+        // student who answered every question correctly was shown
+        // "90 out of 100": a perfect paper that reads as 90%.
+        return 90.0;
       case ExamType.mdcat:
         return 180.0;
       case ExamType.numsMdcat:
