@@ -108,13 +108,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     }
 
     if (user != null) {
-      // Guests are checked first on purpose. An anonymous user has no email,
-      // so emailVerified is false for them, and the branch below would drop
-      // every returning guest into a verification screen with nothing to
-      // verify and no way out.
-      if (user.isAnonymous) {
-        return const HomeScreen();
-      }
       if (user.emailVerified) {
         return const HomeScreen();
       } else {

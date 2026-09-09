@@ -2,10 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
-import 'package:ustaad/core/analytics/analytics_service.dart';
-import 'package:ustaad/core/notifications/push_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/auth/test_selection.dart';
@@ -22,17 +19,6 @@ enum AuthStatus {
   initial,
   loading,
   authenticated,
-
-  /// Signed in anonymously. A real Firebase uid with full access to the app,
-  /// but no email attached yet, so the progress lives only on this install
-  /// until the account is upgraded.
-  ///
-  /// Deliberately distinct from `authenticated`: screens that ask people to
-  /// keep their streak need to tell the two apart, and `emailVerified` is
-  /// false for a guest, which would otherwise drop them into the verification
-  /// screen they were never meant to see.
-  guest,
-
   emailUnverified,
   unauthenticated,
 }
@@ -56,15 +42,6 @@ class AuthState {
   bool get isLoading => status == AuthStatus.loading;
   bool get isUnauthenticated => status == AuthStatus.unauthenticated;
   bool get needsEmailVerification => status == AuthStatus.emailUnverified;
-
-  /// Signed in as a guest, with no email attached yet.
-  bool get isGuest => status == AuthStatus.guest;
-
-  /// Whether the app should let this person in. Guests get the same access as
-  /// signed-up users — gating a guest would defeat the entire point of having
-  /// one — so most screens want this rather than [isAuthenticated].
-  bool get hasAccess =>
-      status == AuthStatus.authenticated || status == AuthStatus.guest;
 
   AuthState copyWith({
     AuthStatus? status,
@@ -130,168 +107,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // This means reload() calls are SILENT to the stream — only reloadUser()
     // handles the email verification state update, with no race condition.
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
-      // Tie analytics and crash reports to the account, so a funnel can be
-      // followed across sessions and a crash report says who hit it. Set before
-      // the busy check: identity has to track the real auth state even while an
-      // operation is still in flight.
-      Analytics.instance.setUser(user?.uid);
-      FirebaseCrashlytics.instance.setUserIdentifier(user?.uid ?? '');
-
-      // Tokens rotate on reinstall, restore and clear-data, and a token
-      // obtained before sign in has nowhere to be stored. Re-persisting on
-      // every authentication is what stops sends quietly going nowhere.
-      if (user != null) PushService.instance.syncToken();
-
       // Respect the busy flag: if an auth operation is in progress,
       // it will set the state itself when it completes.
       if (_isBusy) return;
 
       if (user == null) {
         state = const AuthState(status: AuthStatus.unauthenticated);
-      } else if (user.isAnonymous) {
-        // Must come before the emailVerified check. A guest has no email, so
-        // emailVerified is false, and without this branch every guest would be
-        // sent to the verification screen with nothing to verify.
-        state = AuthState(status: AuthStatus.guest, user: user);
       } else if (!user.emailVerified) {
         state = AuthState(status: AuthStatus.emailUnverified, user: user);
       } else {
         state = AuthState(status: AuthStatus.authenticated, user: user);
       }
     });
-  }
-
-  // ── Guest ──────────────────────────────────────────────────────────────
-  /// Signs in anonymously so the app is usable before an account exists.
-  ///
-  /// Returns false if the guest path is unavailable — the Anonymous provider
-  /// disabled in the console, or no network — and the caller should fall back
-  /// to the login screen rather than leave the student staring at a spinner.
-  Future<bool> continueAsGuest() async {
-    _isBusy = true;
-    state = state.copyWith(status: AuthStatus.loading, clearError: true);
-
-    try {
-      final credential = await _authService.signInAnonymously();
-      final user = credential.user;
-
-      if (user == null) {
-        state = const AuthState(status: AuthStatus.unauthenticated);
-        _isBusy = false;
-        return false;
-      }
-
-      Analytics.instance.guestStarted();
-      state = AuthState(status: AuthStatus.guest, user: user);
-      _isBusy = false;
-      return true;
-    } on FirebaseAuthException catch (e) {
-      // 'operation-not-allowed' means the Anonymous provider is switched off
-      // in the Firebase console. Nothing the student can do about it, so log
-      // it loudly and let them sign in the old way.
-      Analytics.instance.guestUnavailable(reason: e.code);
-      debugPrint('[AuthNotifier] guest sign in failed: ${e.code}');
-      state = const AuthState(status: AuthStatus.unauthenticated);
-      _isBusy = false;
-      return false;
-    } catch (e) {
-      Analytics.instance.guestUnavailable(reason: 'unknown');
-      debugPrint('[AuthNotifier] guest sign in failed: $e');
-      state = const AuthState(status: AuthStatus.unauthenticated);
-      _isBusy = false;
-      return false;
-    }
-  }
-
-  /// Attaches an email and password to the current guest account, keeping the
-  /// uid and therefore every bit of progress made so far.
-  ///
-  /// Returns false and sets [AuthState.errorMessage] on failure. The one worth
-  /// reading carefully is `credential-already-in-use`: that email already has
-  /// an account, and the guest's progress cannot be merged into it
-  /// automatically, so the message tells them to sign in instead.
-  Future<bool> upgradeWithEmail({
-    required String name,
-    required String email,
-    required String password,
-  }) async {
-    _isBusy = true;
-    state = state.copyWith(status: AuthStatus.loading, clearError: true);
-
-    try {
-      final result = await _authService.linkEmailPassword(
-        email: email,
-        password: password,
-        name: name,
-      );
-
-      Analytics.instance.guestUpgraded(method: 'password');
-
-      final user = FirebaseAuth.instance.currentUser ?? result.user;
-      state = AuthState(status: AuthStatus.emailUnverified, user: user);
-      _isBusy = false;
-      return true;
-    } on FirebaseAuthException catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.guest,
-        errorMessage: e.code == 'credential-already-in-use' ||
-                e.code == 'email-already-in-use'
-            ? 'This email already has an account. Log in instead — your guest '
-                'progress on this device will not carry over.'
-            : _mapFirebaseError(e.code),
-      );
-      _isBusy = false;
-      return false;
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.guest,
-        errorMessage: 'Something went wrong. Please try again.',
-      );
-      _isBusy = false;
-      return false;
-    }
-  }
-
-  /// Google equivalent of [upgradeWithEmail]. Google accounts arrive verified,
-  /// so a successful link lands straight in [AuthStatus.authenticated].
-  Future<bool> upgradeWithGoogle() async {
-    _isBusy = true;
-    state = state.copyWith(status: AuthStatus.loading, clearError: true);
-
-    try {
-      final result = await _authService.linkGoogle();
-
-      if (result == null) {
-        // Cancelled the account picker — not an error, stay a guest.
-        state = state.copyWith(status: AuthStatus.guest, clearError: true);
-        _isBusy = false;
-        return false;
-      }
-
-      Analytics.instance.guestUpgraded(method: 'google');
-
-      final user = FirebaseAuth.instance.currentUser ?? result.user;
-      state = AuthState(status: AuthStatus.authenticated, user: user);
-      _isBusy = false;
-      return true;
-    } on FirebaseAuthException catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.guest,
-        errorMessage: e.code == 'credential-already-in-use'
-            ? 'That Google account is already registered. Log in with it '
-                'instead — your guest progress will not carry over.'
-            : _mapFirebaseError(e.code),
-      );
-      _isBusy = false;
-      return false;
-    } catch (e) {
-      state = state.copyWith(
-        status: AuthStatus.guest,
-        errorMessage: 'Google sign in failed. Please try again.',
-      );
-      _isBusy = false;
-      return false;
-    }
   }
 
   // ── Sign In ────────────────────────────────────────────────────────────
@@ -311,9 +138,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         _isBusy = false;
         return false;
       }
-
-      // Past the verification gate, so both return paths below are logins.
-      Analytics.instance.loginSucceeded(method: 'password');
 
       // ── BACKFILL displayName for existing email/password users ─────────
       if (user != null &&
@@ -383,11 +207,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return false;
       }
 
-      // The pair that measures the verification gate: how many accounts get
-      // created versus how many ever come back verified.
-      Analytics.instance.signupSubmitted(method: 'password');
-      Analytics.instance.verificationEmailSent();
-
       state = AuthState(
         status: AuthStatus.emailUnverified,
         user: refreshedUser,
@@ -447,11 +266,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         _isBusy = false;
         return false;
       }
-
-      // Google accounts arrive verified, so this is both signup and login for
-      // a first-time user. Worth watching against the password funnel: if this
-      // path converts far better, the email gate is the problem, not the offer.
-      Analytics.instance.loginSucceeded(method: 'google');
 
       state = AuthState(status: AuthStatus.authenticated, user: user);
       _isBusy = false;
@@ -527,10 +341,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // We just call the service and let the authStateChanges() stream
     // handle the state update.
     try {
-      // Drop the push token before the session goes, so the next person on
-      // this device does not inherit the previous user's notifications.
-      await PushService.instance.onSignOut(const []);
-
       await _authService.logout();
       // Belt-and-suspenders: set state immediately so the UI reacts
       // without waiting for the stream event (which is near-instant

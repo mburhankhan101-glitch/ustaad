@@ -70,27 +70,15 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   // ── Sign up ───────────────────────────────────────────────────────────────
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
-    final notifier = ref.read(authProvider.notifier);
-    notifier.clearError();
+    ref.read(authProvider.notifier).clearError();
 
-    // A guest reaching this screen is upgrading, not registering. Linking the
-    // credential keeps their uid, so the streak, accuracy, weak topics and
-    // seen-question history they built up survive. Calling signUp() here would
-    // mint a fresh uid and silently abandon all of it — which is the one bug
-    // that would make the guest flow worse than no guest flow at all.
-    final isGuest = ref.read(authProvider).isGuest;
-
-    final success = isGuest
-        ? await notifier.upgradeWithEmail(
-            name: _nameController.text.trim(),
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          )
-        : await notifier.signUp(
-            name: _nameController.text.trim(),
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          );
+    final success = await ref
+        .read(authProvider.notifier)
+        .signUp(
+          name: _nameController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        );
 
     if (success && mounted) {
       context.go('/verify_email'); // ← GoRouter
@@ -105,16 +93,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       _showOfflineSnack();
       return;
     }
-    final notifier = ref.read(authProvider.notifier);
-    notifier.clearError();
-
-    // Same uid-preserving reasoning as _signUp: a guest links, everyone else
-    // signs in fresh.
-    final isGuest = ref.read(authProvider).isGuest;
-    final success = isGuest
-        ? await notifier.upgradeWithGoogle()
-        : await notifier.signInWithGoogle();
-
+    ref.read(authProvider.notifier).clearError();
+    final success = await ref.read(authProvider.notifier).signInWithGoogle();
     if (!mounted) return;
     if (success) context.go('/test_selection'); // ← GoRouter
   }
