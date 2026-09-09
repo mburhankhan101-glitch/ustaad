@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
+import 'package:ustaad/providers/auth_provider.dart';
 import 'widgets/onboarding_page.dart';
 import 'widgets/onboarding_dots.dart';
 import '../auth/login_screen.dart';
 
-class OnboardingScreen extends StatefulWidget {
+class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
 
   @override
-  State<OnboardingScreen> createState() => _OnboardingScreenState();
+  ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen>
+class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
     with SingleTickerProviderStateMixin {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
@@ -53,8 +56,37 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         curve: Curves.easeInOut,
       );
     } else {
-      _navigateToLogin();
+      _startPractising();
     }
+  }
+
+  /// Ends onboarding by signing in as a guest and going straight into the app,
+  /// rather than handing a brand new student a login form.
+  ///
+  /// This is the change the whole guest flow exists for: the account and
+  /// email-verification screens sat between an install and the first question,
+  /// which is where most installs were being lost. AuthGateScreen then decides
+  /// exam selection versus home, exactly as it does after a normal signup.
+  ///
+  /// If the guest path is unavailable — Anonymous provider disabled, or no
+  /// network — this falls back to the login screen so nobody is stranded.
+  bool _starting = false;
+
+  Future<void> _startPractising() async {
+    if (_starting) return;
+    setState(() => _starting = true);
+
+    Analytics.instance.onboardingFinished();
+
+    final ok = await ref.read(authProvider.notifier).continueAsGuest();
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ok ? const AuthGateScreen() : const LoginScreen(),
+      ),
+    );
   }
 
   void _navigateToLogin() {
