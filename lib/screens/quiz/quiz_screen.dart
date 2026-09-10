@@ -367,7 +367,12 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
       backgroundColor: Colors.transparent,
       enableDrag: true,
       useSafeArea: true,
-      builder: (_) => ExplanationSheet(question: _current),
+      builder: (_) => ExplanationSheet(
+        question: _current,
+        // The sheet opens on the answer they picked; it can only do that if
+        // the quiz tells it what that was.
+        selectedIndex: _selectedIndex,
+      ),
     );
   }
 

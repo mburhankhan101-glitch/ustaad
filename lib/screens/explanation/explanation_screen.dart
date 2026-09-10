@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
+import 'package:ustaad/models/explanation.dart';
+import 'package:ustaad/screens/explanation/explanation_body.dart';
 import 'package:ustaad/models/question_model.dart';
 import 'package:ustaad/providers/credits_provider.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
@@ -9,25 +11,37 @@ import 'package:ustaad/screens/plans/plans_screen.dart';
 // ─── Inline colors ────────────────────────────────────────────────────────────
 class _C {
   static const primary = Color(0xFF6C63FF);
-  static const bg1 = Color(0xFF0A0E2E);
-  static const bg2 = Color(0xFF1A1464);
-  static const gold = Color(0xFFFFD700);
   static const success = Color(0xFF4CAF50);
-  static const accent = Color(0xFFFF6B6B);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ExplanationSheet
-// Changes vs previous version:
-//   • _GlowingOwl     — pulsing purple aura on the owl while Gemini is loading
-//   • "Ustu is thinking" text shimmers left-to-right like a glisten sweep
-//   • _TypingText      — character-by-character reveal when explanation arrives
-//   • Tap explanation area to skip the typing animation instantly
+//
+// Opens on the answer the student actually picked, then renders the stored
+// explanation as the four labelled parts it is made of: the idea, the numbered
+// working, and the trick and the common mistake behind a tap each.
+//
+// It does not pretend to be generating anything. The explanation ships with the
+// question and is in memory before the sheet is built, so the only wait here is
+// the credits check, which is a real Firestore read.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class ExplanationSheet extends ConsumerStatefulWidget {
   final Question question;
-  const ExplanationSheet({super.key, required this.question});
+
+  /// Which option the student actually picked, when we know.
+  ///
+  /// The sheet used to be opened without it even though the quiz screen had it
+  /// on hand three lines away. It is the difference between a general
+  /// explanation and one that opens by naming the answer this student chose,
+  /// which is the reason they opened the sheet at all.
+  final int? selectedIndex;
+
+  const ExplanationSheet({
+    super.key,
+    required this.question,
+    this.selectedIndex,
+  });
 
   @override
   ConsumerState<ExplanationSheet> createState() => _ExplanationSheetState();
@@ -104,7 +118,7 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
       credits = await ref.read(creditsProvider.future);
     } catch (_) {
       // Provider errored — fail open, never block user due to our own error
-      _fetchExplanation();
+      _showExplanation();
       return;
     }
 
@@ -118,7 +132,7 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
         // Write failed — still show explanation, fix silently
       }
       if (!mounted) return;
-      _fetchExplanation();
+      _showExplanation();
     } else {
       // Out of free uses and no credits → show locked state
       setState(() {
@@ -128,14 +142,14 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
     }
   }
 
-  Future<void> _fetchExplanation() async {
-    if (!mounted) return;
-    setState(() {
-      _loading = true;
-      _explanation = '';
-    });
-
-    await Future.delayed(const Duration(seconds: 2));
+  /// Shows the explanation.
+  ///
+  /// This used to open with `await Future.delayed(Duration(seconds: 2))` and
+  /// then reveal the text one character at a time, which added about four
+  /// seconds to a string that was already in memory on the device before the
+  /// sheet was built. The wait that remains is the credits check, which is a
+  /// real Firestore round trip.
+  void _showExplanation() {
     if (!mounted) return;
 
     final raw = _isUrdu
@@ -143,18 +157,21 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
         : widget.question.explanationEn;
 
     setState(() {
-      _explanation = raw.isNotEmpty ? raw : 'Explanation coming soon.';
+      _explanation = raw.trim();
       _loading = false;
     });
   }
 
   void _onLanguageToggle(bool urdu) {
-    setState(() {
-      _isUrdu = urdu;
-      _loading = true;
-      _explanation = '';
-    });
-    _fetchExplanation();
+    if (_isUrdu == urdu) return;
+    // Both languages were loaded with the question. Switching between them is
+    // not a fetch and must not be dressed up as one.
+    _isUrdu = urdu;
+    Analytics.instance.explanationOpened(
+      exam: widget.question.exam,
+      language: urdu ? 'ur' : 'en',
+    );
+    _showExplanation();
   }
 
   @override
@@ -463,14 +480,22 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white.withOpacity(0.08)),
         ),
-        child: Text(
-          widget.question.text,
-          style: TextStyle(
-            fontFamily: 'Poppins',
-            color: Colors.white.withOpacity(0.75),
-            fontSize: _isUrdu ? 16 : 12, // CHANGED
-            height: _isUrdu ? 2.0 : 1.55,
-          ),
+        child: Builder(
+          builder: (_) {
+            // The question stem is English whatever the explanation toggle
+            // says, so its direction comes from the stem itself.
+            final rtl = isRtlText(widget.question.text);
+            return Text(
+              widget.question.text,
+              textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                color: Colors.white.withOpacity(0.75),
+                fontSize: rtl ? 16 : 12.5,
+                height: rtl ? 2.0 : 1.55,
+              ),
+            );
+          },
         ),
       ),
     );
@@ -540,13 +565,15 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
   }
 
   // ─── Explanation body ─────────────────────────────────────────────────────
-  // Loading  → shimmer bars + glisten "Ustu is thinking..." text
-  // Loaded   → _TypingText character-by-character reveal
-  //            Tap anywhere on the text to skip and reveal instantly.
+  //
+  // The whole string used to go into one Text at 13pt and 82% opacity, so the
+  // labels and the step numbers rendered as literal grey characters inside a
+  // single paragraph. Every explanation in the bank carries four labelled
+  // parts and a numbered solution; this renders them as the parts they are.
   Widget _buildExplanationBody() {
     return _fadeUp(
       animation: _explanationAnim,
-      child: _loading ? _buildThinkingState() : _buildTypingText(),
+      child: _loading ? _buildThinkingState() : _buildStructuredExplanation(),
     );
   }
 
@@ -572,16 +599,14 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
     );
   }
 
-  Widget _buildTypingText() {
-    return _TypingText(
-      text: _explanation,
-      isUrdu: _isUrdu,
-      style: TextStyle(
-        fontFamily: 'Poppins',
-        color: Colors.white.withOpacity(0.82),
-        fontSize: _isUrdu ? 18 : 13, // CHANGED — bigger for Urdu
-        height: _isUrdu ? 2.2 : 1.75,
-      ),
+  Widget _buildStructuredExplanation() {
+    return ExplanationBody(
+      // Rebuild from scratch when the language changes so the step reveal and
+      // the collapsed callouts start fresh rather than carrying over.
+      key: ValueKey(_isUrdu),
+      question: widget.question,
+      explanation: _explanation,
+      selectedIndex: widget.selectedIndex,
     );
   }
 
@@ -812,114 +837,6 @@ class _GlistenTextState extends State<_GlistenText>
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _TypingText
-// Reveals text character by character at a natural reading speed.
-// Speed adapts to explanation length so it always finishes in ~2.5s max.
-// Tap anywhere on the text to skip and reveal the full explanation instantly.
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _TypingText extends StatefulWidget {
-  final String text;
-  final TextStyle style;
-  final bool isUrdu;
-
-  const _TypingText({
-    required this.text,
-    required this.style,
-    required this.isUrdu,
-  });
-
-  @override
-  State<_TypingText> createState() => _TypingTextState();
-}
-
-class _TypingTextState extends State<_TypingText> {
-  int _visibleChars = 0;
-  Timer? _timer;
-  bool _completed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _startTyping();
-  }
-
-  void _startTyping() {
-    final len = widget.text.length;
-    // Aim to complete in ~2.2 seconds; minimum 10ms per char.
-    final msPerChar = (2200 / len).clamp(10.0, 22.0).toInt();
-
-    _timer = Timer.periodic(Duration(milliseconds: msPerChar), (_) {
-      if (!mounted) {
-        _timer?.cancel();
-        return;
-      }
-      if (_visibleChars < len) {
-        setState(() => _visibleChars++);
-      } else {
-        _timer?.cancel();
-        _completed = true;
-      }
-    });
-  }
-
-  void _skipToEnd() {
-    if (_completed) return;
-    _timer?.cancel();
-    setState(() {
-      _visibleChars = widget.text.length;
-      _completed = true;
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final visible = widget.text.substring(0, _visibleChars);
-    return GestureDetector(
-      onTap: _skipToEnd,
-      behavior: HitTestBehavior.translucent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            visible,
-            textDirection: widget.isUrdu
-                ? TextDirection.rtl
-                : TextDirection.ltr,
-            style: widget.style,
-          ),
-          // Blinking cursor while typing
-          if (!_completed) ...[const SizedBox(height: 4), _BlinkingCursor()],
-          // Skip hint — fades out once done
-          if (!_completed)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'Tap to skip →',
-                style: TextStyle(
-                  fontFamily: 'Poppins',
-                  color: Colors.white.withOpacity(0.22),
-                  fontSize: 10,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _BlinkingCursor — typewriter-style blinking line
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _BlinkingCursor extends StatefulWidget {
   @override

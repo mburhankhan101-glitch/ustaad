@@ -213,7 +213,7 @@ class StreakMessage {
 // Add more lines to any list freely; the random picker handles the rest.
 
 const List<String> _morningLines = [
-  'Uth bhi jao [Name], 5 baje Ustu bhi so raha hai, tum kyun jag rahe? Padhai karo.',
+  'Uth bhi jao [Name], 5 baje to Ustu bhi so raha hai.',
   'Chai pi li [Name]? Ab bahana khatam, FAST-NU nahi maanta neend.',
   'Good morning [Name], ghar walon ki umeed jagi ya abhi bhi snooze maar rahi?',
   '[Name] uth jao, Ustu bol raha hai aaj streak break nahi karni.',
