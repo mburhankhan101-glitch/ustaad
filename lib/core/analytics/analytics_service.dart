@@ -15,7 +15,11 @@ class Analytics {
   Analytics._();
   static final Analytics instance = Analytics._();
 
-  final FirebaseAnalytics _fa = FirebaseAnalytics.instance;
+  /// Late, so constructing Analytics never touches Firebase. Read eagerly, it
+  /// threw for any screen that logs from initState when Firebase is not
+  /// initialised, which is every widget test; read here, the failure lands
+  /// inside _log's try and is only printed.
+  late final FirebaseAnalytics _fa = FirebaseAnalytics.instance;
 
   /// Attach to GoRouter so every route change logs a screen_view. One instance,
   /// not one per read — a fresh observer per navigation would leak listeners.
