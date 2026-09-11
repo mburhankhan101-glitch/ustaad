@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/providers/credits_provider.dart';
 import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/feedback/feedback_screen.dart';
 import '../../providers/auth_provider.dart';
 import 'package:ustaad/providers/progress_provider.dart';
+import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:ustaad/screens/auth/test_selection.dart';
+import 'package:ustaad/services/account_deletion_service.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -97,6 +100,22 @@ class ProfileScreen extends ConsumerWidget {
                     label: 'Privacy Policy',
                     onTap: () => _launchPrivacyPolicy(context),
                     trailingIcon: Icons.open_in_new_rounded,
+                  ),
+                ]),
+
+                const SizedBox(height: 24),
+
+                // ── Danger Zone ──────────────────────────────────────────────
+                // Same tile treatment as every other row on this screen. The
+                // weight sits in the two-step confirm and the re-auth, not in
+                // making the row look alarming.
+                _buildSectionLabel('Danger Zone'),
+                const SizedBox(height: 10),
+                _buildMenuCard(context, [
+                  _MenuItem(
+                    icon: Icons.delete_forever_outlined,
+                    label: 'Delete My Account',
+                    onTap: () => _confirmDeleteAccount(context, ref),
                   ),
                 ]),
 
@@ -701,9 +720,323 @@ class ProfileScreen extends ConsumerWidget {
     }
   }
 
+  // ────────────────────────── DELETE ACCOUNT ──────────────────────────────
+  // Google Play requires an in-app deletion path for any app that offers
+  // account creation. Three steps, in this order:
+  //   1. confirm, spelling out exactly what goes
+  //   2. re-authenticate, because Firebase refuses delete() on a stale
+  //      credential and finding that out later would strand a half-deleted
+  //      account
+  //   3. delete Firestore data, then the auth user
+  Future<void> _confirmDeleteAccount(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    final service = AccountDeletionService();
+
+    // Captured before the first await. Deleting the account flips the app to
+    // unauthenticated, and this widget can be deactivated in the rebuild that
+    // follows — which is what made the old `context.mounted` guard false and
+    // silently skipped the trip to the login screen, leaving the profile
+    // rendered with its null-user "Student" placeholder.
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1464),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete account permanently?',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          'Everything will be permanently deleted:\n\n'
+          '•  Your account and login\n'
+          '•  Your streak and daily goals\n'
+          '•  Your progress and accuracy\n'
+          '•  Your quiz and paper history\n\n'
+          'This cannot be undone and we cannot restore it later. '
+          'You will be signed out straight away.',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            fontSize: 13.5,
+            height: 1.55,
+            color: Colors.white.withOpacity(0.7),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                color: Colors.white.withOpacity(0.6),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete forever',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFFF6B6B),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    // ── Step 2: prove it is really them, but only if Firebase insists ─────
+    // The first version prompted every time, so someone who had signed in a
+    // minute earlier still got an unexplained Google account picker. Now the
+    // picker appears only when the credential is genuinely too old.
+    if (service.needsRecentLogin) {
+      final ok = await _reauthenticate(context, service);
+      if (!ok) return; // cancelled, or could not verify
+    }
+
+    if (!context.mounted) return;
+
+    // ── Step 3: delete ────────────────────────────────────────────────────
+    _showSpinner(context);
+
+    try {
+      await service.deleteUserData();
+
+      try {
+        await service.deleteAuthUser();
+      } on FirebaseAuthException catch (e) {
+        // Rare: the credential went stale between the check and here. The data
+        // is already gone, so finish the job rather than stranding an empty
+        // account — ask for the credential once more and retry.
+        if (e.code != 'requires-recent-login') rethrow;
+
+        navigator.pop(); // close spinner while the picker is up
+        if (!context.mounted) return;
+        final ok = await _reauthenticate(context, service);
+        if (!ok) {
+          messenger.showSnackBar(
+            _errorSnack('Sign in again to finish deleting your account.'),
+          );
+          return;
+        }
+        if (context.mounted) _showSpinner(context);
+        await service.deleteAuthUser();
+      }
+
+      // Deleting the auth user flips the app to unauthenticated, which can
+      // deactivate this widget. Everything from here uses the navigator and
+      // messenger captured before the first await, never `context`.
+      navigator.pop(); // close spinner
+
+      // Logged before the user id is cleared on sign out, otherwise the event
+      // lands with no one attached and the deletion rate is unreadable.
+      await Analytics.instance.accountDeleted();
+
+      ref.invalidate(userProgressProvider);
+      await ref.read(authProvider.notifier).signOut();
+
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    } catch (e) {
+      navigator.pop(); // close spinner
+      messenger.showSnackBar(
+        _errorSnack('Could not delete your account. Try again.'),
+      );
+      debugPrint('[Ustaad] Account deletion failed: $e');
+    }
+  }
+
+  void _showSpinner(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: Color(0xFF9C8DFF)),
+      ),
+    );
+  }
+
+  /// Returns true only if the user proved who they are.
+  Future<bool> _reauthenticate(
+    BuildContext context,
+    AccountDeletionService service,
+  ) async {
+    try {
+      if (service.usesPassword) {
+        final password = await _promptPassword(context);
+        if (password == null) return false; // cancelled
+        await service.reauthenticateWithPassword(password);
+        return true;
+      }
+      if (service.usesGoogle) {
+        return await service.reauthenticateWithGoogle();
+      }
+      return true;
+    } on FirebaseAuthException catch (e) {
+      if (context.mounted) _showError(context, _reauthMessage(e.code));
+      return false;
+    } catch (_) {
+      if (context.mounted) {
+        _showError(context, 'Could not verify your identity. Try again.');
+      }
+      return false;
+    }
+  }
+
+  /// Password re-auth prompt. Returns null if the user backs out.
+  Future<String?> _promptPassword(BuildContext context) {
+    final controller = TextEditingController();
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1464),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Confirm Password',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Enter your password to confirm it is you.',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 13,
+                color: Colors.white.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              style: const TextStyle(
+                fontFamily: 'Poppins',
+                color: Colors.white,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Password',
+                hintStyle: TextStyle(
+                  fontFamily: 'Poppins',
+                  color: Colors.white.withOpacity(0.35),
+                ),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.08),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+              ),
+              onSubmitted: (v) => Navigator.pop(ctx, v),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, null),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                color: Colors.white.withOpacity(0.6),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text(
+              'Confirm',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFFF6B6B),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _reauthMessage(String code) {
+    switch (code) {
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'That password is not right.';
+      case 'too-many-requests':
+        return 'Too many attempts. Try again in a few minutes.';
+      case 'network-request-failed':
+        return 'No internet connection.';
+      default:
+        return 'Could not verify your identity. Try again.';
+    }
+  }
+
+  void _showError(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(_errorSnack(message));
+  }
+
+  /// Built separately so it can be shown through a ScaffoldMessenger captured
+  /// before an await, when the originating context may no longer be mounted.
+  SnackBar _errorSnack(String message) {
+    return SnackBar(
+      content: Row(
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Colors.white,
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: const Color(0xFFFF6B6B),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+      duration: const Duration(seconds: 3),
+    );
+  }
+
   Widget _buildVersionTag() => Center(
     child: Text(
-      'Ustaad v1.0.0 • Apna Ustaad',
+      'Ustaad v1.2.0 • Apna Ustaad',
       style: TextStyle(
         fontFamily: 'Poppins',
         fontSize: 11,
@@ -779,6 +1112,7 @@ class ProfileScreen extends ConsumerWidget {
 
     if (result == true) {
       ref.invalidate(userProgressProvider);
+      ref.invalidate(selectedTestsProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Row(
