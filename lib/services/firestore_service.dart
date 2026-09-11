@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ustaad/models/question_model.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -6,10 +7,10 @@ import 'package:ustaad/models/question_model.dart';
 //
 // QUESTION DELIVERY MODEL (pool-pointer / deck-of-cards):
 //
-//   • First call for a section  → fetch ALL matching docs from Firestore server,
-//     place unseen questions first (shuffled), seen questions after (shuffled),
-//     store the whole deck in _pool. Cost: 1 Firestore read per section per
-//     app session.
+//   • First call for a section  → load ALL matching docs (device cache first,
+//     server only if the cache is empty or meta/content.questionsVersion has
+//     changed), place unseen questions first (shuffled), seen questions after
+//     (shuffled), store the whole deck in _pool.
 //
 //   • Every subsequent call     → read from _pool using _pointer. Zero network
 //     reads. Pointer advances so every question is served exactly once before
@@ -31,7 +32,14 @@ import 'package:ustaad/models/question_model.dart';
 //     not after every quiz start. Saves many write operations.
 //
 // READ COST SUMMARY per app session:
-//   Questions    : 1 read × number of distinct sections opened
+//   Version gate : 1 read (meta/content)
+//   Questions    : 0 reads while the cached content version still matches.
+//                  On a fresh install or after a content bump, one read PER
+//                  DOCUMENT in each section opened — Firestore bills per
+//                  document returned, not per query, so a 700-question section
+//                  is 700 reads. That is why the cache gate exists: without it
+//                  this was paid on every cold start, and ~70 quiz starts a day
+//                  across all users would exhaust the 50k/day free tier.
 //   SeenIds      : 1 read × section (SDK cache hit after first install)
 //   Explanations : 1 read × question (only if not in Question model already)
 //   Progress/User: unchanged (transactional writes only, no extra reads)
@@ -362,43 +370,118 @@ class FirestoreService {
   // No GetOptions = Firestore SDK default: server first, local cache if offline.
   // Parallel Future.wait slashes latency when additionalSection is set.
 
+  /// Loads a whole section, preferring the device's Firestore cache.
+  ///
+  /// The pool needs the full section in memory — unseen-first ordering, topic
+  /// filtering and getPoolSize() all read across it — so this cannot simply
+  /// take `.limit(10)`. What it can do is stop paying for the same documents
+  /// on every launch.
+  ///
+  /// `.get()` with no GetOptions resolves to Source.serverAndCache, which goes
+  /// to the server whenever the device is online. So opening one 10-question
+  /// quiz was billing a read for every document in the section — around 700 for
+  /// Physics — on every single cold start. Firestore's free tier is 50k reads a
+  /// day, which is about 70 quiz starts across all users.
+  ///
+  /// Now the cache answers first and the server is only consulted when the
+  /// cache is empty or the published content has actually changed.
   Future<List<Question>> _fetchAllFromServer({
     required String exam,
     required String section,
     String? additionalSection,
   }) async {
-    final futures = <Future<QuerySnapshot<Map<String, dynamic>>>>[
-      _db
-          .collection('questions')
-          .where('exams', arrayContains: exam)
-          .where('section', isEqualTo: section)
-          .get(),
-      if (additionalSection != null)
-        _db
-            .collection('questions')
-            .where('exams', arrayContains: exam)
-            .where('section', isEqualTo: additionalSection)
-            .get(),
-    ];
+    final mustRefresh = await _contentVersionChanged();
 
-    final snapshots = await Future.wait(futures);
-    final questions = <Question>[];
+    Future<List<Question>> load(GetOptions? options) async {
+      final futures = <Future<QuerySnapshot<Map<String, dynamic>>>>[
+        _sectionQuery(exam, section).get(options),
+        if (additionalSection != null)
+          _sectionQuery(exam, additionalSection).get(options),
+      ];
 
-    for (final snapshot in snapshots) {
-      for (final doc in snapshot.docs) {
-        try {
-          questions.add(Question.fromFirestore(doc.data(), doc.id));
-        } catch (e) {
-          print('⚠️ USTAAD: Skipping malformed doc ${doc.id}: $e');
+      final snapshots = await Future.wait(futures);
+      final questions = <Question>[];
+      for (final snapshot in snapshots) {
+        for (final doc in snapshot.docs) {
+          try {
+            questions.add(Question.fromFirestore(doc.data(), doc.id));
+          } catch (e) {
+            print('⚠️ USTAAD: Skipping malformed doc ${doc.id}: $e');
+          }
         }
+      }
+      return questions;
+    }
+
+    if (!mustRefresh) {
+      try {
+        final cached = await load(const GetOptions(source: Source.cache));
+        if (cached.isNotEmpty) {
+          print(
+            '⚡ USTAAD: ${cached.length} questions from device cache '
+            'for $exam / $section — 0 billed reads',
+          );
+          return cached;
+        }
+      } catch (_) {
+        // Nothing cached yet (fresh install, or evicted). Fall through.
       }
     }
 
+    // No GetOptions on purpose: serverAndCache, so a student with no signal
+    // still gets whatever is on the device instead of an empty quiz.
+    final fresh = await load(null);
     print(
-      '📥 USTAAD: Server fetched ${questions.length} docs '
-      'for $exam / $section',
+      '📥 USTAAD: Server fetched ${fresh.length} docs for $exam / $section',
     );
-    return questions;
+    return fresh;
+  }
+
+  /// Safety ceiling. The largest section today is ~713 questions, so this
+  /// changes nothing now — it just stops one runaway section from pulling tens
+  /// of thousands of documents as the bank grows.
+  static const _maxQuestionsPerSection = 2000;
+
+  Query<Map<String, dynamic>> _sectionQuery(String exam, String section) => _db
+      .collection('questions')
+      .where('exams', arrayContains: exam)
+      .where('section', isEqualTo: section)
+      .limit(_maxQuestionsPerSection);
+
+  // ── PRIVATE: CONTENT VERSION GATE ───────────────────────────────────────────
+
+  bool _versionChecked = false;
+  bool _versionStale = false;
+
+  /// One read per app session against `meta/content`. If its `questionsVersion`
+  /// differs from the number stored on the device, the cached questions are
+  /// considered out of date and the next fetch goes to the server.
+  ///
+  /// Bump that field after every upload from the extractor, otherwise devices
+  /// keep serving the questions they already have and never see new content.
+  Future<bool> _contentVersionChanged() async {
+    if (_versionChecked) return _versionStale;
+    _versionChecked = true;
+
+    final prefs = await SharedPreferences.getInstance();
+    final local = prefs.getInt('questionsVersion') ?? -1;
+
+    try {
+      final doc = await _db.doc('meta/content').get();
+      final remote = (doc.data()?['questionsVersion'] as num?)?.toInt() ?? 0;
+      _versionStale = remote != local;
+      if (_versionStale) {
+        await prefs.setInt('questionsVersion', remote);
+        print('🔁 USTAAD: content version $local → $remote, refreshing');
+      }
+    } catch (e) {
+      // Offline, or the meta document/rule is not in place yet. On a first run
+      // there is nothing cached to trust, so fetch; afterwards prefer the
+      // cache rather than billing a full section for a missing marker.
+      _versionStale = local < 0;
+      print('⚠️ USTAAD: content version check failed ($e)');
+    }
+    return _versionStale;
   }
 
   // ── PRIVATE: SEEN IDS HELPERS ───────────────────────────────────────────────
