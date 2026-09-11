@@ -407,9 +407,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
-  String _dateString(DateTime dt) =>
-      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-
   Future<void> _writeWeakTopicShownDate() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -420,20 +417,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {}
   }
 
-  Future<void> _writeBrokenStreakShownDate() async {
+  Future<void> _markBrokenStreakSeen(String lastActiveDate) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'lastBrokenStreakShownDate': _todayString(),
+        'brokenStreakSeenFor': lastActiveDate,
       }, SetOptions(merge: true));
     } catch (_) {}
   }
 
-  void _showBrokenStreakOverlay(String name) {
-    _writeBrokenStreakShownDate();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) UstuOverlays.showBrokenStreak(context, name: name);
+  void _showBrokenStreakOverlay({
+    required String name,
+    required int lost,
+    required String lastActiveDate,
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final shown = await UstuOverlays.showBrokenStreak(
+        context,
+        name: name,
+        lostStreak: lost,
+        onRestart: () {
+          if (mounted) _showQuizPicker();
+        },
+      );
+      // Marked only once it has really been on screen, so a Home that was
+      // covered before it could open does not use the moment up.
+      if (shown) _markBrokenStreakSeen(lastActiveDate);
     });
   }
 
@@ -488,9 +499,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       ),
       data: (progressData) {
-        final int streak = progressData?['streak'] as int? ?? 0;
         final String lastActiveDate =
             progressData?['lastActiveDate'] as String? ?? '';
+        // The stored streak is only rewritten when a session ends, so after a
+        // missed day it still holds the old chain. Home shows the live value.
+        final streakNow = streakStatus(
+          storedStreak: (progressData?['streak'] as num?)?.toInt() ?? 0,
+          lastActiveDate: lastActiveDate,
+        );
+        final int streak = streakNow.streak;
         final int solvedToday = progressData?['solvedToday'] as int? ?? 0;
         final double accuracy =
             (progressData?['accuracy'] as num?)?.toDouble() ?? 0.0;
@@ -597,23 +614,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         }
 
         // ── Broken streak ────────────────────────────────────────────────
-        if (!_brokenStreakShown) {
-          final today = _todayString();
-          final yesterday = _dateString(
-            DateTime.now().subtract(const Duration(days: 1)),
-          );
-          final bool broken =
-              streak == 0 &&
-              lastActiveDate.isNotEmpty &&
-              lastActiveDate != today &&
-              lastActiveDate != yesterday;
-          final lastShownBroken =
-              progressData?['lastBrokenStreakShownDate'] as String? ?? '';
-          if (broken && lastShownBroken != today) {
-            _brokenStreakShown = true;
-            _showBrokenStreakOverlay(_firstName());
-          } else {
-            _brokenStreakShown = true;
+        // Once per lapsed chain, not once a day: brokenStreakSeenFor holds the
+        // last active date of the chain already shown, and a new chain has a
+        // new date.
+        if (!_brokenStreakShown && !isNewUser) {
+          _brokenStreakShown = true;
+          final seenFor = progressData['brokenStreakSeenFor'] as String? ?? '';
+          if (streakNow.isBroken && seenFor != lastActiveDate) {
+            _showBrokenStreakOverlay(
+              name: _firstName(),
+              lost: streakNow.lost,
+              lastActiveDate: lastActiveDate,
+            );
           }
         }
 

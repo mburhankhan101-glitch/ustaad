@@ -89,6 +89,46 @@ StreakUpdate? computeStreakUpdate({
   );
 }
 
+/// A streak as it stands right now, worked out from what was last stored.
+///
+/// The stored streak only changes when a session is finished, so a student who
+/// stops practising keeps their old number in Firestore until they come back.
+/// Read as it was, that number showed a chain alive days after it had ended,
+/// and the broken streak moment, which waited for a stored 0 that nothing ever
+/// wrote, could not happen at all.
+class StreakStatus {
+  /// The streak to show: the stored one while it is alive, 0 once it is not.
+  final int streak;
+
+  /// How long the chain was when it lapsed, or 0 if it has not.
+  final int lost;
+
+  /// Whether the student had practised before and has since missed a day.
+  final bool isBroken;
+
+  const StreakStatus({
+    required this.streak,
+    required this.lost,
+    required this.isBroken,
+  });
+}
+
+StreakStatus streakStatus({
+  required int storedStreak,
+  required String lastActiveDate,
+  DateTime? now,
+}) {
+  final at = now ?? DateTime.now();
+  final alive =
+      lastActiveDate.isEmpty ||
+      lastActiveDate == _dateString(at) ||
+      lastActiveDate == _dateString(at.subtract(const Duration(days: 1)));
+  if (alive) {
+    return StreakStatus(streak: storedStreak, lost: 0, isBroken: false);
+  }
+  return StreakStatus(streak: 0, lost: storedStreak, isBroken: true);
+}
+
 /// A streak celebration waiting for Home to show it.
 ///
 /// Set by updateStreak() the moment the streak goes up, and cleared by

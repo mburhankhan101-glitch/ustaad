@@ -199,6 +199,8 @@ class UstuOverlays {
   static Future<bool> showBrokenStreak(
     BuildContext context, {
     required String name,
+    int lostStreak = 0,
+    VoidCallback? onRestart,
   }) {
     return _present(
       context,
@@ -224,7 +226,11 @@ class UstuOverlays {
               child: FadeTransition(opacity: curved, child: child),
             );
           },
-          pageBuilder: (_, __, ___) => _BrokenStreakContent(name: name),
+          pageBuilder: (_, __, ___) => BrokenStreakContent(
+            name: name,
+            lostStreak: lostStreak,
+            onRestart: onRestart,
+          ),
         );
       },
     );
@@ -326,7 +332,7 @@ class UstuOverlays {
               child: FadeTransition(opacity: curved, child: child),
             );
           },
-          pageBuilder: (_, __, ___) => _WeakTopicOverlayContent(
+          pageBuilder: (_, __, ___) => WeakTopicOverlayContent(
             topic: topic,
             wrongCount: wrongCount,
             exam: exam,
@@ -943,99 +949,215 @@ class _CurvedDashedPathPainter extends CustomPainter {
 // BROKEN STREAK CONTENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BrokenStreakContent extends StatefulWidget {
-  final String name;
-  const _BrokenStreakContent({required this.name});
+/// How long a line takes to type: quick enough to read along with, never so
+/// long that the student sits waiting for it.
+Duration _typingTime(String text, {int msPerChar = 16}) => Duration(
+  milliseconds: (text.characters.length * msPerChar).clamp(420, 1100),
+);
 
-  @override
-  State<_BrokenStreakContent> createState() => _BrokenStreakContentState();
+/// The part of [text] typed by [t], cut on whole characters so an emoji is
+/// never shown half drawn.
+String _typedPrefix(String text, double t) {
+  final chars = text.characters;
+  final n = (chars.length * t).ceil().clamp(0, chars.length);
+  return chars.take(n).toString();
 }
 
-class _BrokenStreakContentState extends State<_BrokenStreakContent>
+/// Fades a child in while lifting it into place.
+class _RiseIn extends StatelessWidget {
+  final Animation<double> animation;
+  final Widget child;
+  const _RiseIn({required this.animation, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (_, child) => Opacity(
+        opacity: animation.value.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(0, 12 * (1 - animation.value)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// The replies a student can give Ustu, and what Ustu says back.
+const _excuses = [
+  (
+    label: 'Padhai mein busy tha 📚',
+    reply:
+        'Busy sab hain, {name}. 10 sawal sirf 5 minute lete hain. Aaj se phir Day 1.',
+  ),
+  (
+    label: 'Bas sust ho gaya 😴',
+    reply:
+        'Chalo, imaandari ke poore number. Susti yahin khatam, Day 1 abhi shuru.',
+  ),
+  (
+    label: 'Doosri app pe tha 👀',
+    reply: 'Mujhe pata tha! 😤 Wapas aa gaye ho toh maaf kiya. Day 1, abhi.',
+  ),
+];
+
+enum _BrokenStage { roast, asking, replying, done }
+
+/// The broken streak moment, shown once when a student comes back after
+/// letting a streak lapse.
+///
+/// Ustu calls it out, asks what happened, and lets the student answer. Each
+/// answer gets its own comeback before the way back into practice appears, so
+/// it plays as a short exchange rather than a banner to dismiss. A tap while a
+/// line is typing finishes it.
+class BrokenStreakContent extends StatefulWidget {
+  final String name;
+
+  /// How long the streak was before it broke; 0 when unknown.
+  final int lostStreak;
+
+  /// Takes the student straight into practice. Without it, the button only
+  /// closes the moment.
+  final VoidCallback? onRestart;
+
+  const BrokenStreakContent({
+    super.key,
+    required this.name,
+    this.lostStreak = 0,
+    this.onRestart,
+  });
+
+  @override
+  State<BrokenStreakContent> createState() => _BrokenStreakContentState();
+}
+
+class _BrokenStreakContentState extends State<BrokenStreakContent>
     with TickerProviderStateMixin {
   static const _coral = Color(0xFFFF6B6B);
 
-  late final AnimationController _svgCtrl;
-  late final Animation<double> _svgScale;
-  late final Animation<double> _svgFade;
+  late final AnimationController _pop = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  late final AnimationController _shake = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 460),
+  );
+  late final AnimationController _hop = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  late final AnimationController _typing = AnimationController(vsync: this);
+  late final AnimationController _chips = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 460),
+  );
+  late final AnimationController _cta = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  );
 
-  late final AnimationController _shakeCtrl;
-  late final Animation<double> _shakeAnim;
+  late final String _roast;
+  _BrokenStage _stage = _BrokenStage.roast;
+  int? _choice;
+  bool _started = false;
+  Timer? _shakeDelay;
 
-  String _visibleText = '';
-  late final String _fullText;
-  bool _typewriterDone = false;
-
-  late final AnimationController _btnCtrl;
-  late final Animation<double> _btnAnim;
+  String get _reply =>
+      _excuses[_choice!].reply.replaceAll('{name}', widget.name);
 
   @override
   void initState() {
     super.initState();
-
-    _fullText =
-        'Wah ${widget.name} Wah, sach sach btana kis doosri app par tyaari kr rhe thay?!';
-
-    _svgCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _svgScale = CurvedAnimation(
-      parent: _svgCtrl,
-      curve: const ElasticOutCurve(0.65),
-    );
-    _svgFade = CurvedAnimation(parent: _svgCtrl, curve: Curves.easeOut);
-
-    _shakeCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _shakeAnim = CurvedAnimation(parent: _shakeCtrl, curve: Curves.linear);
-
-    _btnCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
-    _btnAnim = CurvedAnimation(parent: _btnCtrl, curve: Curves.easeOut);
-
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (!mounted) return;
-      _svgCtrl.forward().then((_) {
-        if (!mounted) return;
-        _shakeCtrl.forward().then((_) {
-          if (!mounted) return;
-          _startTypewriter();
-        });
-      });
-    });
+    final lost = widget.lostStreak;
+    _roast = lost > 1
+        ? 'Wah ${widget.name} wah! $lost din ki streak aise hi chhor di?'
+        : lost == 1
+        ? 'Wah ${widget.name} wah! Ek din ki streak bhi na sambhali?'
+        : 'Wah ${widget.name} wah! Streak toot gayi aur Ustu dekh raha tha.';
+    _typing.addStatusListener(_onTyped);
   }
 
-  void _startTypewriter() async {
-    await Future.delayed(const Duration(milliseconds: 150));
-    for (int i = 1; i <= _fullText.length; i++) {
-      await Future.delayed(const Duration(milliseconds: 28));
-      if (!mounted) return;
-      setState(() => _visibleText = _fullText.substring(0, i));
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+
+    // With system animations off, open on the question, ready to answer.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _pop.value = 1;
+      _chips.value = 1;
+      _stage = _BrokenStage.asking;
+      return;
     }
-    if (!mounted) return;
-    setState(() => _typewriterDone = true);
-    _btnCtrl.forward();
+    _pop.forward();
+    _shakeDelay = Timer(const Duration(milliseconds: 260), () {
+      if (mounted) _shake.forward();
+    });
+    _type(_roast);
+  }
+
+  void _type(String line) {
+    _typing
+      ..duration = _typingTime(line)
+      ..forward(from: 0);
+  }
+
+  void _onTyped(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted) return;
+    if (_stage == _BrokenStage.roast) {
+      setState(() => _stage = _BrokenStage.asking);
+      _chips.forward();
+    } else if (_stage == _BrokenStage.replying) {
+      setState(() => _stage = _BrokenStage.done);
+      _cta.forward();
+    }
+  }
+
+  void _finishLine() {
+    if (_typing.isAnimating) _typing.value = 1;
+  }
+
+  void _choose(int i) {
+    if (_choice != null) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      _choice = i;
+      _stage = _BrokenStage.replying;
+    });
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _hop.value = 1;
+      _cta.value = 1;
+      setState(() => _stage = _BrokenStage.done);
+      return;
+    }
+    _hop.forward(from: 0);
+    _type(_reply);
+  }
+
+  void _close({bool restart = false}) {
+    HapticFeedback.lightImpact();
+    Navigator.of(context).pop();
+    if (restart) widget.onRestart?.call();
   }
 
   @override
   void dispose() {
-    _svgCtrl.dispose();
-    _shakeCtrl.dispose();
-    _btnCtrl.dispose();
+    _shakeDelay?.cancel();
+    _typing.removeStatusListener(_onTyped);
+    for (final c in [_pop, _shake, _hop, _typing, _chips, _cta]) {
+      c.dispose();
+    }
     super.dispose();
-  }
-
-  double _shakeOffset(double t) {
-    return 14 * (1 - t) * sin(t * 3.0 * 2 * pi);
   }
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).height < 700;
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
@@ -1061,155 +1183,387 @@ class _BrokenStreakContentState extends State<_BrokenStreakContent>
               height: 220,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _coral.withOpacity(0.07),
+                color: _coral.withValues(alpha: 0.07),
               ),
             ),
           ),
           SafeArea(
             child: Column(
               children: [
-                const Spacer(flex: 1),
-                _AnimatedFade(
-                  animation: _svgFade,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _coral.withOpacity(0.14),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: _coral.withOpacity(0.4)),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('💀', style: TextStyle(fontSize: 13)),
-                        SizedBox(width: 6),
-                        Text(
-                          'Streak Broken',
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            color: _coral,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                AnimatedBuilder(
-                  animation: Listenable.merge([_svgCtrl, _shakeCtrl]),
-                  builder: (_, __) {
-                    final shakeX = _typewriterDone
-                        ? 0.0
-                        : _shakeOffset(_shakeAnim.value);
-                    return Transform.translate(
-                      offset: Offset(shakeX, 0),
-                      child: Transform.scale(
-                        scale: _svgScale.value,
-                        child: SvgPicture.asset(
-                          'assets/images/ustu_broken_streak.svg',
-                          width: 200,
-                          height: 200,
-                        ),
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _finishLine,
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.fromLTRB(
+                        28,
+                        compact ? 16 : 44,
+                        28,
+                        12,
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 28),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 36),
-                  child: AnimatedBuilder(
-                    animation: _svgFade,
-                    builder: (_, __) => Opacity(
-                      opacity: _svgFade.value,
-                      child: _TypewriterText(
-                        visibleText: _visibleText,
-                        fullText: _fullText,
-                        style: const TextStyle(
-                          fontFamily: 'Poppins',
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          height: 1.55,
-                        ),
-                        cursorColor: _coral,
-                        textAlign: TextAlign.center,
-                        done: _typewriterDone,
+                      child: Column(
+                        children: [
+                          _badge(),
+                          _owl(compact ? 150 : 190),
+                          const SizedBox(height: 14),
+                          _roastLine(),
+                          const SizedBox(height: 22),
+                          _conversation(),
+                        ],
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                _AnimatedFade(
-                  animation: _btnAnim,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(
-                      'Ustu ne notice kar liya tha. Ab wapas aa gaye ho toh theek hai.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Colors.white.withOpacity(0.45),
-                        fontSize: 12,
-                        height: 1.6,
-                      ),
-                    ),
-                  ),
-                ),
-                const Spacer(flex: 2),
-                _AnimatedFade(
-                  animation: _btnAnim,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(28, 0, 28, 36),
-                    child: GestureDetector(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        Navigator.of(context).pop();
-                      },
-                      child: Container(
-                        width: double.infinity,
-                        height: 54,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              _coral.withOpacity(0.9),
-                              _coral.withOpacity(0.7),
-                            ],
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                          ),
-                          borderRadius: BorderRadius.circular(18),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _coral.withOpacity(0.3),
-                              blurRadius: 18,
-                              offset: const Offset(0, 6),
-                            ),
-                          ],
-                        ),
-                        alignment: Alignment.center,
-                        child: const Text(
-                          'Theek hai yaar 😤 — wapas aa gaya',
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                _actions(),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _badge() {
+    final lost = widget.lostStreak;
+    return FadeTransition(
+      opacity: _pop,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: BoxDecoration(
+          color: _coral.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _coral.withValues(alpha: 0.4)),
+        ),
+        child: Text(
+          lost > 0 ? '💀  Streak Broken  ·  $lost → 0' : '💀  Streak Broken',
+          style: const TextStyle(
+            fontFamily: 'Poppins',
+            color: _coral,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _owl(double size) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([_pop, _shake, _hop]),
+      builder: (_, child) {
+        final pop = Curves.easeOutBack.transform(_pop.value);
+        final s = _shake.value;
+        final shakeX = 12 * (1 - s) * sin(s * 3 * 2 * pi);
+        final hopY = -16 * sin(pi * _hop.value);
+        return Opacity(
+          opacity: _pop.value.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(shakeX, hopY),
+            child: Transform.scale(scale: 0.6 + 0.4 * pop, child: child),
+          ),
+        );
+      },
+      // The artwork is a wide canvas with Ustu in the middle, so it is cropped
+      // to a square around him instead of shrunk to fit the whole width.
+      child: SvgPicture.asset(
+        'assets/images/ustu_broken_streak.svg',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        excludeFromSemantics: true,
+      ),
+    );
+  }
+
+  Widget _roastLine() {
+    return AnimatedBuilder(
+      animation: _typing,
+      builder: (_, _) {
+        final typing = _stage == _BrokenStage.roast;
+        return _TypewriterText(
+          visibleText: typing ? _typedPrefix(_roast, _typing.value) : _roast,
+          fullText: _roast,
+          style: const TextStyle(
+            fontFamily: 'Poppins',
+            color: Colors.white,
+            fontSize: 19,
+            fontWeight: FontWeight.w700,
+            height: 1.45,
+          ),
+          cursorColor: _coral,
+          textAlign: TextAlign.center,
+          done: !typing,
+        );
+      },
+    );
+  }
+
+  Widget _conversation() {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: switch (_stage) {
+        _BrokenStage.roast => const SizedBox(width: double.infinity),
+        _BrokenStage.asking => _askingView(),
+        _ => _exchangeView(),
+      },
+    );
+  }
+
+  Widget _askingView() {
+    return Column(
+      key: const ValueKey('asking'),
+      children: [
+        _RiseIn(
+          animation: CurvedAnimation(
+            parent: _chips,
+            curve: const Interval(0, 0.5, curve: Curves.easeOut),
+          ),
+          child: Text(
+            'Sach sach batao, hua kya tha?',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              color: Colors.white.withValues(alpha: 0.6),
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        for (var i = 0; i < _excuses.length; i++)
+          _RiseIn(
+            animation: CurvedAnimation(
+              parent: _chips,
+              curve: Interval(
+                0.15 + i * 0.2,
+                0.55 + i * 0.2,
+                curve: Curves.easeOutCubic,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _ExcuseChip(
+                key: Key('broken-excuse-$i'),
+                label: _excuses[i].label,
+                onTap: () => _choose(i),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _exchangeView() {
+    return Column(
+      key: const ValueKey('exchange'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: _RiseIn(
+            animation: CurvedAnimation(
+              parent: _hop,
+              curve: const Interval(0, 0.6, curve: Curves.easeOutCubic),
+            ),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 260),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFFFF6B6B), Color(0xFFFF8E72)],
+                ),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(18),
+                  topRight: Radius.circular(18),
+                  bottomLeft: Radius.circular(18),
+                  bottomRight: Radius.circular(4),
+                ),
+              ),
+              child: Text(
+                _excuses[_choice!].label,
+                style: const TextStyle(
+                  fontFamily: 'Poppins',
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.10),
+              ),
+              child: const Text('🦉', style: TextStyle(fontSize: 16)),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(18),
+                    topRight: Radius.circular(18),
+                    bottomLeft: Radius.circular(4),
+                    bottomRight: Radius.circular(18),
+                  ),
+                ),
+                child: AnimatedBuilder(
+                  animation: _typing,
+                  builder: (_, _) {
+                    final typing = _stage == _BrokenStage.replying;
+                    return _TypewriterText(
+                      key: const Key('broken-reply'),
+                      visibleText: typing
+                          ? _typedPrefix(_reply, _typing.value)
+                          : _reply,
+                      fullText: _reply,
+                      style: const TextStyle(
+                        fontFamily: 'Poppins',
+                        color: Colors.white,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w500,
+                        height: 1.5,
+                      ),
+                      cursorColor: _coral,
+                      textAlign: TextAlign.left,
+                      done: !typing,
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _actions() {
+    final asked = _stage != _BrokenStage.roast;
+    final done = _stage == _BrokenStage.done;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 4, 28, 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IgnorePointer(
+            ignoring: !done,
+            child: _RiseIn(
+              animation: _cta,
+              child: GestureDetector(
+                key: const Key('broken-restart'),
+                onTap: () => _close(restart: widget.onRestart != null),
+                child: Container(
+                  width: double.infinity,
+                  height: 54,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        _coral.withValues(alpha: 0.95),
+                        const Color(0xFFFF8E72),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _coral.withValues(alpha: 0.3),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    widget.onRestart != null
+                        ? 'Day 1 shuru karo 🔥'
+                        : 'Theek hai, wapas aa gaya 😤',
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          AnimatedOpacity(
+            opacity: asked ? 1 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: TextButton(
+              key: const Key('broken-later'),
+              onPressed: asked ? _close : null,
+              child: Text(
+                'Baad mein',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  color: Colors.white.withValues(alpha: 0.45),
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExcuseChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _ExcuseChip({super.key, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.06),
+        shape: StadiumBorder(
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: const Color(0xFFFF6B6B).withValues(alpha: 0.25),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: 'Poppins',
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1819,14 +2173,14 @@ class _BadScoreContentState extends State<_BadScoreContent>
 // WEAK TOPIC OVERLAY CONTENT (once per day)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _WeakTopicOverlayContent extends StatefulWidget {
+class WeakTopicOverlayContent extends StatefulWidget {
   final String topic;
   final int wrongCount;
   final String exam;
   final String section;
   final VoidCallback onPracticeNow;
 
-  const _WeakTopicOverlayContent({
+  const WeakTopicOverlayContent({
     required this.topic,
     required this.wrongCount,
     required this.exam,
@@ -1835,73 +2189,75 @@ class _WeakTopicOverlayContent extends StatefulWidget {
   });
 
   @override
-  State<_WeakTopicOverlayContent> createState() =>
-      _WeakTopicOverlayContentState();
+  State<WeakTopicOverlayContent> createState() =>
+      WeakTopicOverlayContentState();
 }
 
-class _WeakTopicOverlayContentState extends State<_WeakTopicOverlayContent>
+class WeakTopicOverlayContentState extends State<WeakTopicOverlayContent>
     with TickerProviderStateMixin {
   static const _primary = Color(0xFF6C63FF);
   static const _gold = Color(0xFFFFD700);
 
-  late final AnimationController _svgCtrl;
-  late final Animation<double> _svgScale;
-  late final Animation<double> _svgFade;
+  // The line used to wait 200 ms, then for the artwork's 700 ms bounce, then
+  // 150 ms more, and then type at 25 ms a letter: well over three seconds
+  // before the nudge could be read or a button reached. The artwork and the
+  // text now start together, the line is typed in about a second, and a tap
+  // finishes it at once.
+  late final AnimationController _svgCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  late final AnimationController _typing = AnimationController(vsync: this);
+  late final AnimationController _btnCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  );
+  late final Animation<double> _btnAnim = CurvedAnimation(
+    parent: _btnCtrl,
+    curve: Curves.easeOut,
+  );
 
-  String _visibleText = '';
   late final String _fullText;
-  bool _typewriterDone = false;
-
-  late final AnimationController _btnCtrl;
-  late final Animation<double> _btnAnim;
+  bool _started = false;
 
   @override
   void initState() {
     super.initState();
-
     _fullText =
         'Ustu ne notice kiya: "${widget.topic}" mein ${widget.wrongCount} ghaltiyan. 5 min do, sudhaar do!';
-
-    _svgCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _svgScale = CurvedAnimation(
-      parent: _svgCtrl,
-      curve: const ElasticOutCurve(0.7),
-    );
-    _svgFade = CurvedAnimation(parent: _svgCtrl, curve: Curves.easeOut);
-
-    _btnCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
-    _btnAnim = CurvedAnimation(parent: _btnCtrl, curve: Curves.easeOut);
-
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (!mounted) return;
-      _svgCtrl.forward().then((_) {
-        if (!mounted) return;
-        _startTypewriter();
-      });
-    });
+    _typing
+      ..duration = _typingTime(_fullText, msPerChar: 13)
+      ..addStatusListener(_onTyped);
   }
 
-  void _startTypewriter() async {
-    await Future.delayed(const Duration(milliseconds: 150));
-    for (int i = 1; i <= _fullText.length; i++) {
-      await Future.delayed(const Duration(milliseconds: 25));
-      if (!mounted) return;
-      setState(() => _visibleText = _fullText.substring(0, i));
+  void _onTyped(AnimationStatus status) {
+    if (status == AnimationStatus.completed && mounted) _btnCtrl.forward();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _svgCtrl.value = 1;
+      _typing.value = 1;
+      _btnCtrl.value = 1;
+      return;
     }
-    if (!mounted) return;
-    setState(() => _typewriterDone = true);
-    _btnCtrl.forward();
+    _svgCtrl.forward();
+    _typing.forward();
+  }
+
+  void _finishLine() {
+    if (_typing.isAnimating) _typing.value = 1;
   }
 
   @override
   void dispose() {
+    _typing.removeStatusListener(_onTyped);
     _svgCtrl.dispose();
+    _typing.dispose();
     _btnCtrl.dispose();
     super.dispose();
   }
@@ -1933,69 +2289,71 @@ class _WeakTopicOverlayContentState extends State<_WeakTopicOverlayContent>
               height: 200,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: _primary.withOpacity(0.08),
+                color: _primary.withValues(alpha: 0.08),
               ),
             ),
           ),
           SafeArea(
-            child: Column(
-              children: [
-                const Spacer(flex: 1),
-                _AnimatedFade(
-                  animation: _svgFade,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _primary.withOpacity(0.14),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: _primary.withOpacity(0.4)),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('🦉', style: TextStyle(fontSize: 13)),
-                        SizedBox(width: 6),
-                        Text(
-                          'Weak Spot Alert',
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            color: _primary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.6,
-                          ),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _finishLine,
+              child: Column(
+                children: [
+                  const Spacer(flex: 1),
+                  _AnimatedFade(
+                    animation: _svgCtrl,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _primary.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _primary.withValues(alpha: 0.4),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                AnimatedBuilder(
-                  animation: _svgCtrl,
-                  builder: (_, __) => Transform.scale(
-                    scale: _svgScale.value,
-                    child: Opacity(
-                      opacity: _svgFade.value.clamp(0.0, 1.0),
-                      child: SvgPicture.asset(
-                        'assets/images/ustu_weak_topic.svg',
-                        width: 200,
-                        height: 200,
+                      ),
+                      child: const Text(
+                        '🦉  Weak Spot Alert',
+                        style: TextStyle(
+                          fontFamily: 'Poppins',
+                          color: _primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 28),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 36),
-                  child: AnimatedBuilder(
-                    animation: _svgFade,
-                    builder: (_, __) => Opacity(
-                      opacity: _svgFade.value,
-                      child: _TypewriterText(
-                        visibleText: _visibleText,
+                  AnimatedBuilder(
+                    animation: _svgCtrl,
+                    builder: (_, child) {
+                      final v = _svgCtrl.value;
+                      return Opacity(
+                        opacity: Curves.easeOut.transform(v),
+                        child: Transform.scale(
+                          scale: 0.7 + 0.3 * Curves.easeOutBack.transform(v),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: SvgPicture.asset(
+                      'assets/images/ustu_weak_topic.svg',
+                      width: 200,
+                      height: 200,
+                      excludeFromSemantics: true,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 36),
+                    child: AnimatedBuilder(
+                      animation: _typing,
+                      builder: (_, _) => _TypewriterText(
+                        key: const Key('weak-topic-line'),
+                        visibleText: _typedPrefix(_fullText, _typing.value),
                         fullText: _fullText,
                         style: const TextStyle(
                           fontFamily: 'Poppins',
@@ -2006,108 +2364,102 @@ class _WeakTopicOverlayContentState extends State<_WeakTopicOverlayContent>
                         ),
                         cursorColor: _gold,
                         textAlign: TextAlign.center,
-                        done: _typewriterDone,
+                        done: _typing.isCompleted,
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                _AnimatedFade(
-                  animation: _btnAnim,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(
-                      'Competitive dost ne shayad yeh topic pehle hi clear kar liya. Der mat karo!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Colors.white.withOpacity(0.45),
-                        fontSize: 12,
-                        height: 1.6,
-                      ),
-                    ),
-                  ),
-                ),
-                const Spacer(flex: 2),
-                _AnimatedFade(
-                  animation: _btnAnim,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              HapticFeedback.lightImpact();
-                              Navigator.of(context).pop();
-                            },
-                            child: Container(
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.15),
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                'Baad Mein',
-                                style: TextStyle(
-                                  fontFamily: 'Poppins',
-                                  color: Colors.white.withOpacity(0.55),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
+                  const SizedBox(height: 12),
+                  _AnimatedFade(
+                    animation: _btnAnim,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40),
+                      child: Text(
+                        'Competitive dost ne shayad yeh topic pehle hi clear kar liya. Der mat karo!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontFamily: 'Poppins',
+                          color: Colors.white.withValues(alpha: 0.45),
+                          fontSize: 12,
+                          height: 1.6,
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: GestureDetector(
-                            onTap: () {
-                              HapticFeedback.lightImpact();
-                              Navigator.of(context).pop();
-                              widget.onPracticeNow();
-                            },
-                            child: Container(
-                              height: 48,
-                              decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                  colors: [_primary, Color(0xFF9B94FF)],
-                                  begin: Alignment.centerLeft,
-                                  end: Alignment.centerRight,
-                                ),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              alignment: Alignment.center,
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text('⚡', style: TextStyle(fontSize: 14)),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'Practice Now',
-                                    style: TextStyle(
-                                      fontFamily: 'Poppins',
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                    ),
+                      ),
+                    ),
+                  ),
+                  const Spacer(flex: 2),
+                  _AnimatedFade(
+                    animation: _btnAnim,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              key: const Key('weak-topic-later'),
+                              onTap: () {
+                                HapticFeedback.lightImpact();
+                                Navigator.of(context).pop();
+                              },
+                              child: Container(
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.15),
                                   ),
-                                ],
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  'Baad Mein',
+                                  style: TextStyle(
+                                    fontFamily: 'Poppins',
+                                    color: Colors.white.withValues(alpha: 0.55),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: GestureDetector(
+                              onTap: () {
+                                HapticFeedback.lightImpact();
+                                Navigator.of(context).pop();
+                                widget.onPracticeNow();
+                              },
+                              child: Container(
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [_primary, Color(0xFF9B94FF)],
+                                    begin: Alignment.centerLeft,
+                                    end: Alignment.centerRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                alignment: Alignment.center,
+                                child: const Text(
+                                  '⚡  Practice Now',
+                                  style: TextStyle(
+                                    fontFamily: 'Poppins',
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-              ],
+                  const SizedBox(height: 24),
+                ],
+              ),
             ),
           ),
         ],
@@ -2129,6 +2481,7 @@ class _TypewriterText extends StatefulWidget {
   final bool done;
 
   const _TypewriterText({
+    super.key,
     required this.visibleText,
     required this.fullText,
     required this.style,
@@ -2200,14 +2553,16 @@ class _TypewriterTextState extends State<_TypewriterText>
     );
   }
 
+  // Anchored to the top: the space is sized for the finished text, and a
+  // half-typed line centred in it sat between lines and jumped up as it grew.
   AlignmentGeometry _alignFromTextAlign() {
     switch (widget.textAlign) {
       case TextAlign.center:
-        return Alignment.center;
+        return Alignment.topCenter;
       case TextAlign.right:
-        return Alignment.centerRight;
+        return Alignment.topRight;
       default:
-        return Alignment.centerLeft;
+        return Alignment.topLeft;
     }
   }
 }
