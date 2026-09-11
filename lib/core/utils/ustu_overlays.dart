@@ -1,27 +1,63 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // ustu_overlays.dart
 //
-// Four Ustu SVG overlay moments:
-//   1. Ustu Broken Streak Overlay  → shown on HomeScreen when streak is broken (once per day)
+// Five Ustu SVG/Lottie overlay moments:
+//   1. Ustu Broken Streak Overlay  → shown on HomeScreen when streak is broken
 //   2. Ustu Perfect Score Overlay  → shown on ResultScreen when score ≥ 7
 //   3. Ustu Bad Score Overlay      → shown on ResultScreen when score ≤ 6
-//   4. Ustu Weak Topic Overlay     → shown on HomeScreen for the worst weak topic (once per day)
+//   4. Ustu Weak Topic Overlay     → shown on HomeScreen for the worst weak topic
+//   5. Ustu Progress Map Overlay   → shown on HomeScreen/Quiz completion for streak progress
 //
 // HOW TO USE:
 //   UstuOverlays.showBrokenStreak(context, name: 'Burhan');
 //   UstuOverlays.showPerfectScore(context, name: 'Burhan', correct: 8, total: 10);
 //   UstuOverlays.showBadScore(context, name: 'Burhan', correct: 4, total: 10);
 //   UstuOverlays.showWeakTopicOverlay(context, topic: 'Trigonometry', wrongCount: 5, exam: 'FAST-NU', section: 'Advanced Maths', onPracticeNow: () { ... });
+//   UstuOverlays.showStreakProgressMap(context, currentStreak: 3, isCatchUp: true);
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:math';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:lottie/lottie.dart';
 
 class UstuOverlays {
   UstuOverlays._();
 
   // ── Public entry-points ─────────────────────────────────────────────────────
+
+  static void showStreakProgressMap(
+    BuildContext context, {
+    required int currentStreak,
+    bool isCatchUp = false,
+  }) {
+    HapticFeedback.heavyImpact();
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.85),
+      transitionDuration: const Duration(milliseconds: 500),
+      transitionBuilder: (_, anim, __, child) {
+        final curved = CurvedAnimation(
+          parent: anim,
+          curve: Curves.easeOutCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 1),
+            end: Offset.zero,
+          ).animate(curved),
+          child: FadeTransition(opacity: curved, child: child),
+        );
+      },
+      pageBuilder: (_, __, ___) => _StreakProgressMapContent(
+        currentStreak: currentStreak,
+        isCatchUp: isCatchUp,
+      ),
+    );
+  }
 
   static void showBrokenStreak(BuildContext context, {required String name}) {
     HapticFeedback.heavyImpact();
@@ -136,6 +172,413 @@ class UstuOverlays {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STREAK PROGRESS MAP CONTENT (Curved Game Path)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _StreakProgressMapContent extends StatefulWidget {
+  final int currentStreak;
+  final bool isCatchUp;
+
+  const _StreakProgressMapContent({
+    required this.currentStreak,
+    required this.isCatchUp,
+  });
+
+  @override
+  State<_StreakProgressMapContent> createState() =>
+      _StreakProgressMapContentState();
+}
+
+class _StreakProgressMapContentState extends State<_StreakProgressMapContent>
+    with TickerProviderStateMixin {
+  static const _gold = Color(0xFFFFD700);
+  static const _primary = Color(0xFF6C63FF);
+
+  late int _displayStreak;
+  bool _showStageTwo = false;
+  bool _animationComplete = false;
+
+  late final AnimationController _btnCtrl;
+  late final Animation<double> _btnAnim;
+
+  late final int _stageStartDay;
+  late final int _stageEndDay;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _showStageTwo = widget.currentStreak >= 8;
+
+    int stageMultiplier = ((widget.currentStreak - 1) ~/ 7);
+    if (widget.currentStreak == 0) stageMultiplier = 0;
+
+    _stageStartDay = (stageMultiplier * 7) + 1;
+    _stageEndDay = _stageStartDay + 6;
+
+    _btnCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _btnAnim = CurvedAnimation(parent: _btnCtrl, curve: Curves.easeOut);
+
+    if (widget.isCatchUp) {
+      _displayStreak = (_stageStartDay - 1).clamp(0, 999);
+      if (_displayStreak == widget.currentStreak) {
+        _displayStreak = widget.currentStreak - 1;
+      }
+
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted) {
+          setState(() => _displayStreak = widget.currentStreak);
+          _triggerCompletionDelay(800);
+        }
+      });
+    } else {
+      _displayStreak = (widget.currentStreak - 1).clamp(0, 999);
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted) {
+          setState(() => _displayStreak = widget.currentStreak);
+          _triggerCompletionDelay(1200);
+        }
+      });
+    }
+  }
+
+  void _triggerCompletionDelay(int milliseconds) {
+    Future.delayed(Duration(milliseconds: milliseconds), () {
+      if (mounted) {
+        setState(() => _animationComplete = true);
+        _btnCtrl.forward();
+        HapticFeedback.mediumImpact();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _btnCtrl.dispose();
+    super.dispose();
+  }
+
+  double _getCurveX(double t, double width) {
+    final double center = width / 2;
+    final double amplitude = width * 0.35;
+    return center + amplitude * sin(t * 2 * pi);
+  }
+
+  double _getCurveY(double t, double height) {
+    return t * height;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Color> bgColors = _showStageTwo
+        ? [const Color(0xFF1A1464), const Color(0xFF0F0830)]
+        : [const Color(0xFF0A0E2E), const Color(0xFF1A1464)];
+
+    final screenHeight = MediaQuery.of(context).size.height;
+    final double mapTopPadding = screenHeight * 0.22;
+    final double mapBottomPadding = screenHeight * 0.30;
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: bgColors,
+              ),
+            ),
+          ),
+
+          if (_showStageTwo)
+            Positioned(
+              top: -100,
+              right: -50,
+              child: Container(
+                width: 300,
+                height: 300,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _gold.withOpacity(0.05),
+                ),
+              ),
+            ),
+
+          Positioned.fill(
+            top: mapTopPadding,
+            bottom: mapBottomPadding,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final double W = constraints.maxWidth;
+                final double H = constraints.maxHeight;
+
+                double relativeOwlStreak = (_displayStreak - _stageStartDay)
+                    .toDouble();
+                if (relativeOwlStreak < -1) relativeOwlStreak = -1;
+                if (relativeOwlStreak > 6) relativeOwlStreak = 6;
+
+                final double tOwl = relativeOwlStreak / 6.0;
+                final double owlX = _getCurveX(tOwl, W);
+                final double owlY = _getCurveY(tOwl, H);
+
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned.fill(
+                      child: CustomPaint(painter: _CurvedDashedPathPainter()),
+                    ),
+
+                    for (int i = 0; i <= 6; i++) ...[
+                      Builder(
+                        builder: (context) {
+                          final double t = i / 6.0;
+                          final double nodeX = _getCurveX(t, W);
+                          final double nodeY = _getCurveY(t, H);
+                          final int dayNumber = _stageStartDay + i;
+                          final bool isReached = dayNumber <= _displayStreak;
+                          final bool isCurrent = dayNumber == _displayStreak;
+
+                          final double nodeSize = isCurrent ? 58.0 : 48.0;
+
+                          return Positioned(
+                            left: nodeX - (nodeSize / 2),
+                            top: nodeY - (nodeSize / 2),
+                            child: _buildNumberedNode(
+                              dayNumber: dayNumber,
+                              isReached: isReached,
+                              isCurrent: isCurrent,
+                              size: nodeSize,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+
+                    AnimatedPositioned(
+                      duration: widget.isCatchUp
+                          ? const Duration(milliseconds: 800)
+                          : const Duration(milliseconds: 1200),
+                      curve: Curves.easeInOutCubic,
+                      left: owlX - 45,
+                      top: owlY - 65,
+                      child: SizedBox(
+                        width: 90,
+                        height: 90,
+                        child: Lottie.asset(
+                          'assets/images/ustu_owl.json',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _showStageTwo ? 'PHASE 2 UNLOCKED' : 'STREAK MAP',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: _showStageTwo ? _gold : _primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2.0,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${widget.currentStreak} Days Strong 🔥',
+                      style: const TextStyle(
+                        fontFamily: 'Poppins',
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: _AnimatedFade(
+              animation: _btnAnim,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(28, 0, 28, 48),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_animationComplete && !widget.isCatchUp)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 24),
+                        child: Text(
+                          'Ek aur din, ek aur qadam. Keep it up! 🚀',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        Navigator.of(context).pop();
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        height: 54,
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [_primary, Color(0xFF9B94FF)],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _primary.withOpacity(0.35),
+                              blurRadius: 20,
+                              offset: const Offset(0, 7),
+                            ),
+                          ],
+                        ),
+                        alignment: Alignment.center,
+                        child: const Text(
+                          'Let\'s Go',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNumberedNode({
+    required int dayNumber,
+    required bool isReached,
+    required bool isCurrent,
+    required double size,
+  }) {
+    final Color bgColor = isReached ? _gold : const Color(0xFF1A1A2E);
+    final Color borderColor = isReached ? _gold : Colors.white.withOpacity(0.2);
+    final Color textColor = isReached
+        ? Colors.black
+        : Colors.white.withOpacity(0.5);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: bgColor,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: isCurrent ? Colors.white : borderColor,
+          width: isCurrent ? 4 : 3,
+        ),
+        boxShadow: isCurrent
+            ? [
+                BoxShadow(
+                  color: _gold.withOpacity(0.6),
+                  blurRadius: 16,
+                  spreadRadius: 4,
+                ),
+              ]
+            : (isReached
+                  ? [BoxShadow(color: _gold.withOpacity(0.3), blurRadius: 8)]
+                  : []),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '$dayNumber',
+        style: TextStyle(
+          fontFamily: 'Poppins',
+          color: textColor,
+          fontSize: isCurrent ? 24 : 18,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _CurvedDashedPathPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path();
+    bool isFirst = true;
+
+    for (double t = -0.2; t <= 1.2; t += 0.02) {
+      double x = (size.width / 2) + (size.width * 0.35) * sin(t * 2 * pi);
+      double y = t * size.height;
+
+      if (isFirst) {
+        path.moveTo(x, y);
+        isFirst = false;
+      } else {
+        path.lineTo(x, y);
+      }
+    }
+
+    final paint = Paint()
+      ..color = Colors.white.withOpacity(0.2)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.5
+      ..strokeCap = StrokeCap.round;
+
+    Path dashedPath = Path();
+    const double dashWidth = 12.0;
+    const double dashSpace = 8.0;
+
+    for (final measurePath in path.computeMetrics()) {
+      double distance = 0.0;
+      while (distance < measurePath.length) {
+        dashedPath.addPath(
+          measurePath.extractPath(distance, distance + dashWidth),
+          Offset.zero,
+        );
+        distance += dashWidth + dashSpace;
+      }
+    }
+
+    canvas.drawPath(dashedPath, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BROKEN STREAK CONTENT
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -186,10 +629,7 @@ class _BrokenStreakContentState extends State<_BrokenStreakContent>
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
-    _shakeAnim = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.elasticOut));
+    _shakeAnim = CurvedAnimation(parent: _shakeCtrl, curve: Curves.linear);
 
     _btnCtrl = AnimationController(
       vsync: this,
@@ -230,18 +670,7 @@ class _BrokenStreakContentState extends State<_BrokenStreakContent>
   }
 
   double _shakeOffset(double t) {
-    return 10 * (1 - t) * _sineWave(t, frequency: 3.0);
-  }
-
-  double _sineWave(double t, {required double frequency}) {
-    return (t * frequency * 3.14159 * 2).let((radians) => _sin(radians));
-  }
-
-  double _sin(double x) {
-    const pi = 3.14159265358979;
-    x = x % (2 * pi);
-    if (x > pi) x -= 2 * pi;
-    return (16 * x * (pi - x)) / (5 * pi * pi - 4 * x * (pi - x));
+    return 14 * (1 - t) * sin(t * 3.0 * 2 * pi);
   }
 
   @override
@@ -800,10 +1229,7 @@ class _BadScoreContentState extends State<_BadScoreContent>
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
-    _shakeAnim = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.elasticOut));
+    _shakeAnim = CurvedAnimation(parent: _shakeCtrl, curve: Curves.linear);
 
     _btnCtrl = AnimationController(
       vsync: this,
@@ -844,18 +1270,7 @@ class _BadScoreContentState extends State<_BadScoreContent>
   }
 
   double _shakeOffset(double t) {
-    return 10 * (1 - t) * _sineWave(t, frequency: 3.0);
-  }
-
-  double _sineWave(double t, {required double frequency}) {
-    return (t * frequency * 3.14159 * 2).let((radians) => _sin(radians));
-  }
-
-  double _sin(double x) {
-    const pi = 3.14159265358979;
-    x = x % (2 * pi);
-    if (x > pi) x -= 2 * pi;
-    return (16 * x * (pi - x)) / (5 * pi * pi - 4 * x * (pi - x));
+    return 14 * (1 - t) * sin(t * 3.0 * 2 * pi);
   }
 
   @override
@@ -1448,8 +1863,4 @@ class _AnimatedFade extends AnimatedWidget {
     final anim = listenable as Animation<double>;
     return Opacity(opacity: anim.value.clamp(0.0, 1.0), child: child);
   }
-}
-
-extension _Let<T> on T {
-  R let<R>(R Function(T it) block) => block(this);
 }
