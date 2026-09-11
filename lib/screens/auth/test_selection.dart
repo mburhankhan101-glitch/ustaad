@@ -302,7 +302,6 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
   late final Animation<double> _ustuBounce;
 
   late final AnimationController _btnController;
-  late final Animation<double> _btnFade;
 
   late final AnimationController _cardsController;
   late final List<Animation<Offset>> _cardSlides;
@@ -369,7 +368,6 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _btnFade = CurvedAnimation(parent: _btnController, curve: Curves.easeIn);
 
     _cardsController = AnimationController(
       vsync: this,

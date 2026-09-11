@@ -1157,21 +1157,6 @@ class ProfileScreen extends ConsumerWidget {
     }
   }
 
-  void _comingSoon(BuildContext context, String feature) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '$feature — coming soon!',
-          style: const TextStyle(fontFamily: 'Poppins'),
-        ),
-        backgroundColor: const Color(0xFF6C63FF),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
   Future<void> _launchInstagram(BuildContext context) async {
     final uri = Uri.parse('https://instagram.com/theustaadapp');
     try {
@@ -1229,30 +1214,6 @@ class ProfileScreen extends ConsumerWidget {
         margin: const EdgeInsets.all(16),
         duration: const Duration(seconds: 3),
       ),
-    );
-  }
-}
-
-// ─── Dotted Divider ─────────────────────────────────────────────────────────
-class _DottedDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (_, constraints) {
-        const dashW = 5.0, gap = 4.0;
-        final count = (constraints.constrainWidth() / (dashW + gap)).floor();
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: List.generate(
-            count,
-            (_) => Container(
-              width: dashW,
-              height: 1,
-              color: Colors.white.withOpacity(0.15),
-            ),
-          ),
-        );
-      },
     );
   }
 }
