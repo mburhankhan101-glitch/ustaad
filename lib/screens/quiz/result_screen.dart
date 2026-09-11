@@ -225,6 +225,14 @@ class _ResultScreenState extends State<ResultScreen>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    // Started first, not queued behind the saves below. Those are
+    // transactions, which each need a server round trip and fail outright
+    // offline, and the streak used to wait for both before it even began:
+    // several seconds on a slow connection, long enough to be back on Home
+    // before the streak had changed. They write different fields, so running
+    // side by side is safe.
+    final streak = updateStreak();
+
     await FirestoreService().saveProgress(
       uid: user.uid,
       exam: widget.exam,
@@ -244,7 +252,7 @@ class _ResultScreenState extends State<ResultScreen>
       );
     }
 
-    await updateStreak();
+    await streak;
   }
 
   void _setupAnimations() {

@@ -1,4 +1,3 @@
-import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -226,9 +225,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   List<String> _cachedSelectedTests =
       []; // cached so _showQuizPicker can filter tabs
 
-  // ── Streak-increase celebration (stream-diff based — see _openQuiz note) ──
-  int? _lastKnownStreak;
-  int? _pendingStreakCelebration;
+  // ── Streak-increase celebration (see pendingStreakCelebration) ──────────
+  bool _celebrationScheduled = false;
 
   AnimationController? _entranceCtrl;
   Animation<double>? _headerAnim;
@@ -271,6 +269,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
     _setupEntranceAnims();
 
+    pendingStreakCelebration.addListener(_onStreakCelebrationRequested);
+    // Decode the owl now, so the first celebration never waits on a file.
+    WidgetsBinding.instance.addPostFrameCallback((_) => UstuOverlays.warmUp());
+
     // Topic subscription happens on the exam-selection screen, which existing
     // users have already passed through and may never revisit. Without this
     // backfill they would stay unsubscribed and a broadcast would only ever
@@ -297,8 +299,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    pendingStreakCelebration.removeListener(_onStreakCelebrationRequested);
     _entranceCtrl?.dispose();
     super.dispose();
+  }
+
+  void _onStreakCelebrationRequested() {
+    // Rebuild so build() can decide whether Home is visible to show it now.
+    if (mounted && pendingStreakCelebration.value != null) setState(() {});
   }
 
   late final List<Widget> _screens = [
@@ -436,29 +444,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required String section,
   }) {
     _writeWeakTopicShownDate();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        UstuOverlays.showWeakTopicOverlay(
-          context,
-          topic: topTopic,
-          wrongCount: topCount,
-          exam: exam,
-          section: section,
-          onPracticeNow: () => _openQuiz(
-            exam,
-            section,
-            topic: topTopic,
-            limit: 4,
-            isWeakTopicPractice: true, // ← Bug 2 flag
-          ),
-        );
-      }
-    });
+    // Its only caller is already a post-frame callback. A second one here put
+    // this overlay a frame behind anything raised in the same build, which is
+    // how it ended up opening on top of a streak celebration.
+    if (!mounted) return;
+    UstuOverlays.showWeakTopicOverlay(
+      context,
+      topic: topTopic,
+      wrongCount: topCount,
+      exam: exam,
+      section: section,
+      onPracticeNow: () => _openQuiz(
+        exam,
+        section,
+        topic: topTopic,
+        limit: 4,
+        isWeakTopicPractice: true, // ← Bug 2 flag
+      ),
+    );
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // Read on every build, not only while a celebration is pending, so Home is
+    // always rebuilt the moment a route covering it is popped.
+    final route = ModalRoute.of(context);
     final progressAsync = ref.watch(userProgressProvider);
     final isWeb = MediaQuery.of(context).size.width > 600;
 
@@ -486,37 +497,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         final bool isNewUser = progressData == null;
 
         // ── Streak increase → celebrate with the progress map ─────────────
-        // Deliberately NOT driven by QuizScreen's navigation result: it uses
-        // Navigator.pushReplacement to ResultScreen, which resolves Home's
-        // original push future immediately (with null) the moment the quiz
-        // finishes — long before the user actually leaves the results
-        // screen. Watching the streak value itself sidesteps that entirely
-        // and works regardless of how many screens the flow goes through.
-        if (_lastKnownStreak == null) {
-          _lastKnownStreak =
-              streak; // first emission this session — baseline only
-        } else if (streak > _lastKnownStreak!) {
-          _pendingStreakCelebration = streak;
-          _lastKnownStreak = streak;
-        }
-        if (_pendingStreakCelebration != null) {
-          // Only fire while Home is the visible route — if QuizScreen/
-          // ResultScreen is still covering it (e.g. the Firestore write
-          // landed early), defer until Home is current again.
-          final bool isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
-          if (isCurrentRoute) {
-            final celebrateStreak = _pendingStreakCelebration!;
-            _pendingStreakCelebration = null;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                UstuOverlays.showStreakProgressMap(
-                  context,
-                  currentStreak: celebrateStreak,
-                  isCatchUp: false, // slow, one-step "you just earned this"
-                );
-              }
-            });
-          }
+        // updateStreak() raises pendingStreakCelebration the moment the streak
+        // goes up, whichever screen earned it. Home shows it only while it is
+        // the visible route; if the results screen is still covering it, the
+        // ModalRoute dependency at the top of build() rebuilds Home as soon as
+        // that screen is popped, and the celebration goes out then.
+        if (pendingStreakCelebration.value != null &&
+            (route?.isCurrent ?? true) &&
+            !_celebrationScheduled) {
+          _celebrationScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            _celebrationScheduled = false;
+            final streakToCelebrate = pendingStreakCelebration.value;
+            if (!mounted || streakToCelebrate == null) return;
+            if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+            pendingStreakCelebration.value = null;
+            final shown = await UstuOverlays.showStreakProgressMap(
+              context,
+              currentStreak: streakToCelebrate,
+              isCatchUp: false, // slow, one-step "you just earned this"
+            );
+            // Covered again before it could open: keep it for when Home is
+            // back on top, rather than losing today's celebration.
+            if (!shown &&
+                (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true))) {
+              pendingStreakCelebration.value ??= streakToCelebrate;
+            }
+          });
         }
         final Map<String, dynamic> sectionMap =
             progressData?['progress'] as Map<String, dynamic>? ?? {};
