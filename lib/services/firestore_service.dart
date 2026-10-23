@@ -125,6 +125,9 @@ class FirestoreService {
         final pool = _pool[key];
         if (pool == null || pool.isEmpty) return [];
 
+        // Explained first here too, and it matters most here: a weak topic
+        // drill is precisely the moment a student needs to be told why they
+        // keep getting something wrong.
         final filtered =
             pool
                 .where(
@@ -133,7 +136,12 @@ class FirestoreService {
                       topic.trim().toLowerCase(),
                 )
                 .toList()
-              ..shuffle();
+              ..shuffle()
+              ..sort((a, b) {
+                final aHas = a.explanationEn.trim().isNotEmpty ? 0 : 1;
+                final bHas = b.explanationEn.trim().isNotEmpty ? 0 : 1;
+                return aHas.compareTo(bHas);
+              });
 
         final count = filtered.length < limit ? filtered.length : limit;
         print(
@@ -302,16 +310,44 @@ class FirestoreService {
     // 4. Unseen questions first (shuffled), seen questions after (shuffled).
     //    This means every new question is always shown before revisiting old ones,
     //    even if the unseen count is smaller than the requested limit.
-    final unseen = all.where((q) => !seen.contains(q.id)).toList()..shuffle();
-    final seenList = all.where((q) => seen.contains(q.id)).toList()..shuffle();
+    //
+    //    Within each of those two groups, questions that actually carry an
+    //    explanation are served first. The bank is only part explained, so a
+    //    purely random order meant a student met "Explanation coming soon"
+    //    roughly as often as the section's coverage gap — the app failing at
+    //    the one thing it promises. Ordering costs nothing and front-loads the
+    //    explained ones, which is worth far more than any single batch of
+    //    newly written explanations.
+    //
+    //    Unseen still outranks explained: never repeating a question is the
+    //    stronger promise, and a fresh unexplained question beats one the
+    //    student has already answered.
+    bool explained(Question q) => q.explanationEn.trim().isNotEmpty;
+
+    List<Question> ordered(bool Function(Question) inGroup) {
+      final withText = <Question>[];
+      final without = <Question>[];
+      for (final q in all) {
+        if (!inGroup(q)) continue;
+        (explained(q) ? withText : without).add(q);
+      }
+      withText.shuffle();
+      without.shuffle();
+      return [...withText, ...without];
+    }
+
+    final unseen = ordered((q) => !seen.contains(q.id));
+    final seenList = ordered((q) => seen.contains(q.id));
 
     _pool[key] = [...unseen, ...seenList];
     _pointer[key] = 0;
 
+    final explainedCount = all.where(explained).length;
     print(
       '🏗️ USTAAD Pool[$key]: '
       '${unseen.length} unseen + ${seenList.length} seen '
-      '= ${_pool[key]!.length} total',
+      '= ${_pool[key]!.length} total, '
+      '$explainedCount explained first',
     );
   }
 
@@ -339,7 +375,16 @@ class FirestoreService {
     while (result.length < limit && guard < maxIterations) {
       // ── Deck exhausted: reshuffle and reset ─────────────────────────────
       if (ptr >= pool.length) {
+        // Reshuffle, then restore explained-first. A plain shuffle here would
+        // quietly undo the ordering _buildPool established, so a student who
+        // got through a whole deck would start meeting "Explanation coming
+        // soon" on the second pass.
         pool.shuffle();
+        pool.sort((a, b) {
+          final aHas = a.explanationEn.trim().isNotEmpty ? 0 : 1;
+          final bHas = b.explanationEn.trim().isNotEmpty ? 0 : 1;
+          return aHas.compareTo(bHas);
+        });
         ptr = 0;
         _seenCache[key] = {};
         if (uid != null) {

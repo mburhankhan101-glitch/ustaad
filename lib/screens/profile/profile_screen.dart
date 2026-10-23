@@ -12,6 +12,7 @@ import 'package:ustaad/screens/plans/plans_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:ustaad/screens/auth/test_selection.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:ustaad/services/account_deletion_service.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -1034,14 +1035,28 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
+  /// Reads the real version off the bundle rather than carrying a literal.
+  ///
+  /// This line has now been wrong twice: it still said v1.2.0 while the app
+  /// shipped 1.3.1, because a hardcoded version only stays right until the
+  /// next release and nothing fails when it drifts. feedback_screen already
+  /// moved to PackageInfo for the same reason; this is the last literal.
   Widget _buildVersionTag() => Center(
-    child: Text(
-      'Ustaad v1.2.0 • Apna Ustaad',
-      style: TextStyle(
-        fontFamily: 'Poppins',
-        fontSize: 11,
-        color: Colors.white.withOpacity(0.22),
-      ),
+    child: FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snapshot) {
+        final version = snapshot.data?.version;
+        return Text(
+          version == null
+              ? 'Ustaad • Apna Ustaad'
+              : 'Ustaad v$version • Apna Ustaad',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            fontSize: 11,
+            color: Colors.white.withOpacity(0.22),
+          ),
+        );
+      },
     ),
   );
 
