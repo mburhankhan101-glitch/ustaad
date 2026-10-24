@@ -2,7 +2,7 @@ name: ustaad
 description: "Apna Ustaad — AI-powered exam prep for Pakistani students."
 publish_to: 'none'
 
-version: 1.3.3+8
+version: 1.3.4+9
 
 environment:
   sdk: ^3.11.0
