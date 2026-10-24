@@ -165,7 +165,6 @@ const _mdcatSections = [
     dbSection: 'English',
     weightLabel: '5% of MDCAT',
     barColor: UstaadColors.primary,
-    comingSoon: true,
   ),
   QuizSection(
     emoji: '🧩',
@@ -206,7 +205,6 @@ const _numsSections = [
     dbSection: 'English',
     weightLabel: '10% of NUMS',
     barColor: UstaadColors.primary,
-    comingSoon: true,
   ),
 ];
 
