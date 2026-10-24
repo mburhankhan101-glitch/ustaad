@@ -12,6 +12,7 @@ import 'package:ustaad/screens/explanation/explanation_screen.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
 import 'package:ustaad/services/firestore_service.dart';
 import 'package:ustaad/services/haptic_service.dart';
+import 'package:ustaad/widgets/common/no_questions_widget.dart';
 import 'package:ustaad/widgets/common/skeleton_widgets.dart';
 import 'result_screen.dart';
 
@@ -66,6 +67,11 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
   bool _isOffline = false;
   bool _isNavigating = false;
   bool _loadOfflineError = false;
+
+  /// The fetch itself threw. Different from an empty bank: this one is worth
+  /// retrying, and without it a thrown fetch left the skeleton spinning
+  /// forever.
+  bool _loadFailed = false;
   bool _quizCompleted = false;
   bool _isLocked =
       false; // true when user has no credits and free tier exhausted
@@ -93,10 +99,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
 
     // The activation event. Install to here is what the signup wall and the
     // email-verification gate are eating, and it has been invisible until now.
-    Analytics.instance.quizStarted(
-      exam: widget.exam,
-      section: widget.section,
-    );
+    Analytics.instance.quizStarted(exam: widget.exam, section: widget.section);
 
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -178,16 +181,29 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
       return;
     }
 
-    final questions = await FirestoreService().fetchQuestions(
-      exam: widget.exam,
-      section: widget.section,
-      uid: FirebaseAuth.instance.currentUser!.uid,
-      limit: widget.limit,
-      topic: widget.topic,
-    );
+    List<Question> questions;
+    try {
+      questions = await FirestoreService().fetchQuestions(
+        exam: widget.exam,
+        section: widget.section,
+        uid: FirebaseAuth.instance.currentUser!.uid,
+        limit: widget.limit,
+        topic: widget.topic,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingQuestions = false;
+        _loadFailed = true;
+      });
+      return;
+    }
+
+    if (!mounted) return;
 
     setState(() {
       _questions = questions;
+      _loadFailed = false;
       _userAnswers = List.generate(questions.length, (i) {
         return i < widget.initialIndex ? -2 : null;
       });
@@ -413,18 +429,38 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
       return const QuizLoadingSkeleton();
     }
 
-    // Empty
+    // Empty — either we have not written these questions yet, or the fetch
+    // failed. NoQuestionsWidget tells those apart; it used to be a line of
+    // grey text reading "Check your Firestore data", which students saw.
     if (_questions.isEmpty) {
       return Scaffold(
         backgroundColor: UstaadColors.background1,
-        body: Center(
-          child: Text(
-            'No questions found.\nCheck your Firestore data.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
-              fontFamily: 'Poppins',
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                UstaadColors.background1,
+                UstaadColors.background2,
+                UstaadColors.background3,
+              ],
+              stops: [0.0, 0.55, 1.0],
             ),
+          ),
+          child: NoQuestionsWidget(
+            section: widget.section,
+            exam: widget.exam,
+            onBack: () => Navigator.of(context).pop(),
+            onRetry: _loadFailed
+                ? () {
+                    setState(() {
+                      _loadingQuestions = true;
+                      _loadFailed = false;
+                    });
+                    _loadQuestions();
+                  }
+                : null,
           ),
         ),
       );

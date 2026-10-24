@@ -206,7 +206,12 @@ class _ExplanationSheetState extends ConsumerState<ExplanationSheet>
             child: _isLocked
                 ? _buildLockedState()
                 : SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(22, 16, 22, 32),
+                    padding: EdgeInsets.fromLTRB(
+                      22,
+                      16,
+                      22,
+                      32 + MediaQuery.of(context).viewPadding.bottom,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

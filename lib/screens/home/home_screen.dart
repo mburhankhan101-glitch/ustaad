@@ -1,4 +1,3 @@
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -37,6 +36,12 @@ class QuizSection {
   final String dbSection;
   final double progress;
   final Color barColor;
+
+  /// The subject is on the real paper but we have no questions for it yet.
+  /// The tile still shows — a student picking MDCAT should see that English
+  /// is part of the exam — but it says so instead of opening an empty quiz.
+  final bool comingSoon;
+
   const QuizSection({
     required this.emoji,
     required this.title,
@@ -44,6 +49,7 @@ class QuizSection {
     required this.dbSection,
     this.progress = 0.0,
     required this.barColor,
+    this.comingSoon = false,
   });
 }
 
@@ -159,6 +165,7 @@ const _mdcatSections = [
     dbSection: 'English',
     weightLabel: '5% of MDCAT',
     barColor: UstaadColors.primary,
+    comingSoon: true,
   ),
   QuizSection(
     emoji: '🧩',
@@ -166,6 +173,40 @@ const _mdcatSections = [
     dbSection: 'Logical Reasoning',
     weightLabel: '5% of MDCAT',
     barColor: UstaadColors.gold,
+    comingSoon: true,
+  ),
+];
+
+// NUMS shares MDCAT's bank — same subjects, different weightages.
+const _numsSections = [
+  QuizSection(
+    emoji: '🧬',
+    title: 'Biology',
+    dbSection: 'Biology',
+    weightLabel: '34% of NUMS',
+    barColor: UstaadColors.success,
+  ),
+  QuizSection(
+    emoji: '⚗️',
+    title: 'Chemistry',
+    dbSection: 'Chemistry',
+    weightLabel: '28% of NUMS',
+    barColor: Color(0xFF00BCD4),
+  ),
+  QuizSection(
+    emoji: '⚡',
+    title: 'Physics',
+    dbSection: 'Physics',
+    weightLabel: '28% of NUMS',
+    barColor: UstaadColors.accent,
+  ),
+  QuizSection(
+    emoji: '📝',
+    title: 'English',
+    dbSection: 'English',
+    weightLabel: '10% of NUMS',
+    barColor: UstaadColors.primary,
+    comingSoon: true,
   ),
 ];
 
@@ -189,6 +230,7 @@ const _examTabs = [
   ExamTab(id: 'NUST-NET', label: 'NUST-NET', sections: _nustNetSections),
   ExamTab(id: 'NAT-NTS', label: 'NTS', sections: _ntsSections),
   ExamTab(id: 'MDCAT', label: 'MDCAT', sections: _mdcatSections),
+  ExamTab(id: 'NUMS', label: 'NUMS', sections: _numsSections),
 ];
 
 class _NavItem {
@@ -1827,90 +1869,126 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         : '${(realProgress * 100).round()}% DONE';
 
     return GestureDetector(
-      onTap: () => _openQuiz(searchExam, s.dbSection),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white10,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.emoji, style: const TextStyle(fontSize: 24)),
-                const SizedBox(height: 10),
-                Text(
-                  s.title,
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
+      onTap: () => s.comingSoon
+          ? _showComingSoon(s)
+          : _openQuiz(searchExam, s.dbSection),
+      child: Opacity(
+        opacity: s.comingSoon ? 0.55 : 1.0,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Stack(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.emoji, style: const TextStyle(fontSize: 24)),
+                  const SizedBox(height: 10),
+                  Text(
+                    s.title,
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  s.weightLabel,
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    color: Colors.white54,
-                    fontSize: 10,
+                  const SizedBox(height: 3),
+                  Text(
+                    s.weightLabel,
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white54,
+                      fontSize: 10,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: LinearProgressIndicator(
-                    value: realProgress,
-                    minHeight: 5,
-                    backgroundColor: Colors.white10,
-                    valueColor: AlwaysStoppedAnimation<Color>(s.barColor),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: LinearProgressIndicator(
+                      value: realProgress,
+                      minHeight: 5,
+                      backgroundColor: Colors.white10,
+                      valueColor: AlwaysStoppedAnimation<Color>(s.barColor),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  pctText,
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    color: Colors.white.withOpacity(0.4),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-            if (notStarted)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4CAF50).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'NEW',
+                  const SizedBox(height: 4),
+                  Text(
+                    pctText,
                     style: TextStyle(
                       fontFamily: 'Poppins',
-                      color: Color(0xFF4CAF50),
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
+                      color: Colors.white.withOpacity(0.4),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+              if (s.comingSoon || notStarted)
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          (s.comingSoon
+                                  ? UstaadColors.gold
+                                  : const Color(0xFF4CAF50))
+                              .withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      s.comingSoon ? 'SOON' : 'NEW',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: s.comingSoon
+                            ? UstaadColors.gold
+                            : const Color(0xFF4CAF50),
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  /// A subject that is on the paper but not yet in our question bank. Saying
+  /// so plainly beats letting them tap into a quiz with nothing in it.
+  void _showComingSoon(QuizSection s) {
+    HapticService.prominent();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          s.title +
+              ' questions are being written right now. They will appear '
+                  'here as soon as they are ready.',
+          style: const TextStyle(
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.w600,
+            fontSize: 12.5,
+          ),
+        ),
+        backgroundColor: const Color(0xFF1A1464),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -1992,6 +2070,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       isScrollControlled: true,
       builder: (_) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setModalState) {
+          // targetSdk 36 means Android draws this sheet behind the system
+          // navigation bar, so the last row used to be sliced in half on
+          // tall phones. viewPadding (not padding) survives inside a sheet
+          // route, so take the inset from there and give it back as padding.
+          final bottomInset = MediaQuery.of(context).viewPadding.bottom;
           return Container(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.75,
@@ -2073,7 +2156,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
+                    padding: EdgeInsets.fromLTRB(22, 0, 22, 24 + bottomInset),
                     itemCount: visibleTabs[safeIndex].sections.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, i) {
@@ -2082,58 +2165,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       return GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
+                          if (s.comingSoon) {
+                            _showComingSoon(s);
+                            return;
+                          }
                           String searchExam = examLabel == "NTS-NAT"
                               ? "NTS"
                               : examLabel;
                           _openQuiz(searchExam, s.dbSection);
                         },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white10),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                s.emoji,
-                                style: const TextStyle(fontSize: 20),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      s.title,
-                                      style: const TextStyle(
-                                        fontFamily: 'Poppins',
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    Text(
-                                      s.weightLabel,
-                                      style: const TextStyle(
-                                        fontFamily: 'Poppins',
-                                        color: Colors.white54,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ],
+                        child: Opacity(
+                          opacity: s.comingSoon ? 0.55 : 1.0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.07),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white10),
+                            ),
+                            child: Row(
+                              children: [
+                                Text(
+                                  s.emoji,
+                                  style: const TextStyle(fontSize: 20),
                                 ),
-                              ),
-                              const Icon(
-                                Icons.arrow_forward_ios_rounded,
-                                color: Colors.white30,
-                                size: 14,
-                              ),
-                            ],
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        s.title,
+                                        style: const TextStyle(
+                                          fontFamily: 'Poppins',
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        s.weightLabel,
+                                        style: const TextStyle(
+                                          fontFamily: 'Poppins',
+                                          color: Colors.white54,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  s.comingSoon
+                                      ? Icons.hourglass_empty_rounded
+                                      : Icons.arrow_forward_ios_rounded,
+                                  color: Colors.white30,
+                                  size: 14,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );

@@ -26,12 +26,26 @@ final selectedTestsProvider = FutureProvider<List<String>>((ref) async {
   final uid = authState.user?.uid;
   if (uid == null) return [];
 
-  final doc = await FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .get();
+  // Same care as LoginScreen._navigateAfterLogin: a bare get() silently
+  // falls back to the local cache when the backend is unreachable, and on a
+  // fresh install that cache is empty. Returning [] in that case is not a
+  // harmless default — it makes the home screen show every exam tab instead
+  // of the student's own, so prefer the server and only use the cache as a
+  // fallback.
+  final ref_ = FirebaseFirestore.instance.collection('users').doc(uid);
 
-  final data = doc.data();
+  DocumentSnapshot<Map<String, dynamic>>? doc;
+  try {
+    doc = await ref_.get(const GetOptions(source: Source.server));
+  } catch (_) {
+    try {
+      doc = await ref_.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      doc = null;
+    }
+  }
+
+  final data = doc?.data();
   if (data == null) return [];
 
   return (data['selectedTests'] as List<dynamic>?)
