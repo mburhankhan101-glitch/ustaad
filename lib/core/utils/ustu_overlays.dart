@@ -707,7 +707,12 @@ class _StreakProgressMapState extends State<StreakProgressMap>
                       child: Transform.translate(
                         offset: Offset(0, 16 * (1 - button)),
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(28, 0, 28, 48),
+                          padding: EdgeInsets.fromLTRB(
+                            28,
+                            0,
+                            28,
+                            48 + MediaQuery.of(context).viewPadding.bottom,
+                          ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -798,9 +803,7 @@ class _StreakProgressMapState extends State<StreakProgressMap>
 
     const double size = 48;
     final Color bg = reached ? _gold : const Color(0xFF1A1A2E);
-    final Color border = reached
-        ? _gold
-        : Colors.white.withValues(alpha: 0.2);
+    final Color border = reached ? _gold : Colors.white.withValues(alpha: 0.2);
     final Color text = reached
         ? Colors.black
         : Colors.white.withValues(alpha: 0.5);
@@ -829,7 +832,12 @@ class _StreakProgressMapState extends State<StreakProgressMap>
                     ),
                   ]
                 : reached
-                ? [BoxShadow(color: _gold.withValues(alpha: 0.3), blurRadius: 8)]
+                ? [
+                    BoxShadow(
+                      color: _gold.withValues(alpha: 0.3),
+                      blurRadius: 8,
+                    ),
+                  ]
                 : const [],
           ),
           alignment: Alignment.center,

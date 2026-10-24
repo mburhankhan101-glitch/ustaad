@@ -1741,15 +1741,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Exam tabs this student should see. Filtered by id (which is what
+  /// Firestore's selectedTests holds), never by label — NTS is stored as
+  /// 'NAT-NTS' and displayed as 'NTS'.
+  ///
+  /// Falls back to every tab when the filter leaves nothing, which happens
+  /// if selectedTests names an exam we no longer ship. Showing all of them
+  /// is wrong but harmless; an empty list makes clamp(0, -1) throw.
+  List<ExamTab> _visibleTabs(List<String> selectedTests) {
+    if (selectedTests.isEmpty) return _examTabs;
+    final matched = _examTabs
+        .where((t) => selectedTests.contains(t.id))
+        .toList();
+    return matched.isEmpty ? _examTabs : matched;
+  }
+
   Widget _buildQuizSection(
     Map<String, dynamic> sectionMap,
     List<String> selectedTests,
   ) {
-    // Filter by id (matches Firestore selectedTests), NOT label.
-    // NTS is stored as 'NAT-NTS' in Firestore but displayed as 'NTS'.
-    final visibleTabs = selectedTests.isEmpty
-        ? _examTabs
-        : _examTabs.where((t) => selectedTests.contains(t.id)).toList();
+    final visibleTabs = _visibleTabs(selectedTests);
     final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
 
     return Column(
@@ -2058,18 +2069,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _showQuizPicker() {
-    // Use same filtering logic as _buildQuizSection
-    final visibleTabs = _cachedSelectedTests.isEmpty
-        ? _examTabs
-        : _examTabs.where((t) => _cachedSelectedTests.contains(t.id)).toList();
-    final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
-
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setModalState) {
+          // Both of these have to be read on every rebuild. Hoisting
+          // safeIndex above showModalBottomSheet froze it at whichever exam
+          // was open when the sheet appeared, so tapping NUST-NET moved the
+          // home screen underneath but left the sheet on FAST-NU's subjects.
+          final visibleTabs = _visibleTabs(_cachedSelectedTests);
+          final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
+
           // targetSdk 36 means Android draws this sheet behind the system
           // navigation bar, so the last row used to be sliced in half on
           // tall phones. viewPadding (not padding) survives inside a sheet

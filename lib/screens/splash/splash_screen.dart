@@ -321,9 +321,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                 // ✅ Only show progress bar on mobile — on web it's never visible
                 if (!kIsWeb)
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 60,
-                      vertical: 48,
+                    // Bottom inset included for the same reason as the
+                    // streak map: Android draws this behind the navigation
+                    // bar now, which was eating the whole 48px gap.
+                    padding: EdgeInsets.fromLTRB(
+                      60,
+                      48,
+                      60,
+                      48 + MediaQuery.of(context).viewPadding.bottom,
                     ),
                     child: Column(
                       children: [
