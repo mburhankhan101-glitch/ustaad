@@ -26,7 +26,7 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
           .read(paperSessionProvider.notifier)
           .startPaper(
             widget.examType,
-            uid: FirebaseAuth.instance.currentUser!.uid,
+            uid: FirebaseAuth.instance.currentUser?.uid ?? '',
           );
     });
   }

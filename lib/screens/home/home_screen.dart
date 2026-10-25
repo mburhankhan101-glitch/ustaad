@@ -1,11 +1,11 @@
-import 'dart:math';
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/svg.dart';
+import 'package:ustaad/core/notifications/push_service.dart';
+import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/papers/paper_selection_screen.dart';
 import 'package:ustaad/screens/quiz/quiz_screen.dart';
 import 'package:ustaad/screens/profile/profile_screen.dart';
@@ -36,6 +36,12 @@ class QuizSection {
   final String dbSection;
   final double progress;
   final Color barColor;
+
+  /// The subject is on the real paper but we have no questions for it yet.
+  /// The tile still shows — a student picking MDCAT should see that English
+  /// is part of the exam — but it says so instead of opening an empty quiz.
+  final bool comingSoon;
+
   const QuizSection({
     required this.emoji,
     required this.title,
@@ -43,6 +49,7 @@ class QuizSection {
     required this.dbSection,
     this.progress = 0.0,
     required this.barColor,
+    this.comingSoon = false,
   });
 }
 
@@ -130,16 +137,98 @@ const _ntsSections = [
   ),
 ];
 
+const _mdcatSections = [
+  QuizSection(
+    emoji: '🧬',
+    title: 'Biology',
+    dbSection: 'Biology',
+    weightLabel: '45% of MDCAT',
+    barColor: UstaadColors.success,
+  ),
+  QuizSection(
+    emoji: '⚗️',
+    title: 'Chemistry',
+    dbSection: 'Chemistry',
+    weightLabel: '25% of MDCAT',
+    barColor: Color(0xFF00BCD4),
+  ),
+  QuizSection(
+    emoji: '⚡',
+    title: 'Physics',
+    dbSection: 'Physics',
+    weightLabel: '20% of MDCAT',
+    barColor: UstaadColors.accent,
+  ),
+  QuizSection(
+    emoji: '📝',
+    title: 'English',
+    dbSection: 'English',
+    weightLabel: '5% of MDCAT',
+    barColor: UstaadColors.primary,
+  ),
+  QuizSection(
+    emoji: '🧩',
+    title: 'Logical Reasoning',
+    dbSection: 'Logical Reasoning',
+    weightLabel: '5% of MDCAT',
+    barColor: UstaadColors.gold,
+    comingSoon: true,
+  ),
+];
+
+// NUMS shares MDCAT's bank — same subjects, different weightages.
+const _numsSections = [
+  QuizSection(
+    emoji: '🧬',
+    title: 'Biology',
+    dbSection: 'Biology',
+    weightLabel: '34% of NUMS',
+    barColor: UstaadColors.success,
+  ),
+  QuizSection(
+    emoji: '⚗️',
+    title: 'Chemistry',
+    dbSection: 'Chemistry',
+    weightLabel: '28% of NUMS',
+    barColor: Color(0xFF00BCD4),
+  ),
+  QuizSection(
+    emoji: '⚡',
+    title: 'Physics',
+    dbSection: 'Physics',
+    weightLabel: '28% of NUMS',
+    barColor: UstaadColors.accent,
+  ),
+  QuizSection(
+    emoji: '📝',
+    title: 'English',
+    dbSection: 'English',
+    weightLabel: '10% of NUMS',
+    barColor: UstaadColors.primary,
+  ),
+];
+
 class ExamTab {
+  /// [id] matches the value stored in Firestore's selectedTests field.
+  /// [label] is the display name shown on the tab chip AND used as the
+  /// prefix for Firestore question keys (e.g. 'NTS_English').
+  /// These are different for NTS: id='NAT-NTS', label='NTS'.
+  final String id;
   final String label;
   final List<QuizSection> sections;
-  const ExamTab({required this.label, required this.sections});
+  const ExamTab({
+    required this.id,
+    required this.label,
+    required this.sections,
+  });
 }
 
 const _examTabs = [
-  ExamTab(label: 'FAST-NU', sections: _fastNuSections),
-  ExamTab(label: 'NUST-NET', sections: _nustNetSections),
-  ExamTab(label: 'NTS', sections: _ntsSections),
+  ExamTab(id: 'FAST-NU', label: 'FAST-NU', sections: _fastNuSections),
+  ExamTab(id: 'NUST-NET', label: 'NUST-NET', sections: _nustNetSections),
+  ExamTab(id: 'NAT-NTS', label: 'NTS', sections: _ntsSections),
+  ExamTab(id: 'MDCAT', label: 'MDCAT', sections: _mdcatSections),
+  ExamTab(id: 'NUMS', label: 'NUMS', sections: _numsSections),
 ];
 
 class _NavItem {
@@ -170,8 +259,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   int _selectedNav = 0;
 
   String? _cachedGreeting;
+  String? _greetingForName;
   bool _weakTopicShown = false;
   bool _brokenStreakShown = false;
+  List<String> _cachedSelectedTests =
+      []; // cached so _showQuizPicker can filter tabs
+
+  // ── Streak-increase celebration (see pendingStreakCelebration) ──────────
+  bool _celebrationScheduled = false;
 
   AnimationController? _entranceCtrl;
   Animation<double>? _headerAnim;
@@ -213,6 +308,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       vsync: this,
     );
     _setupEntranceAnims();
+
+    pendingStreakCelebration.addListener(_onStreakCelebrationRequested);
+    // Decode the owl now, so the first celebration never waits on a file.
+    WidgetsBinding.instance.addPostFrameCallback((_) => UstuOverlays.warmUp());
+
+    // Topic subscription happens on the exam-selection screen, which existing
+    // users have already passed through and may never revisit. Without this
+    // backfill they would stay unsubscribed and a broadcast would only ever
+    // reach accounts created after this release.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final exams = await ref.read(selectedTestsProvider.future);
+      if (exams.isNotEmpty) PushService.instance.syncTopics(exams);
+    });
   }
 
   void _setupEntranceAnims() {
@@ -231,8 +339,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    pendingStreakCelebration.removeListener(_onStreakCelebrationRequested);
     _entranceCtrl?.dispose();
     super.dispose();
+  }
+
+  void _onStreakCelebrationRequested() {
+    // Rebuild so build() can decide whether Home is visible to show it now.
+    if (mounted && pendingStreakCelebration.value != null) setState(() {});
   }
 
   late final List<Widget> _screens = [
@@ -254,6 +368,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final name = ref.watch(currentUserProvider);
     if (name == null || name.trim().isEmpty) return 'Student';
     return name.trim().split(' ').first;
+  }
+
+  /// The time-of-day greeting, cached against the name it was built for.
+  ///
+  /// getGreeting() picks at random from a pool, so it must be called once per
+  /// name and never again — every extra call returns a different line.
+  ///
+  /// The previous version keyed off the 'Student' placeholder instead: it
+  /// refused to cache until a real name arrived, on the assumption that
+  /// displayName is null only for a frame or two after a cold start. For a
+  /// guest, displayName is null for the entire session, so the cache never
+  /// populated and the fallback re-randomised the greeting on every single
+  /// rebuild. Different lines are different lengths, so the text rewrapped and
+  /// the whole header jumped — the home screen visibly shook.
+  ///
+  /// Keying on the name fixes both cases: stable for a guest, and recomputed
+  /// exactly once when the placeholder is replaced by a real name after
+  /// signing in.
+  String get _greetingLine {
+    final name = _firstName();
+    if (_greetingForName != name) {
+      _greetingForName = name;
+      _cachedGreeting = getGreeting(name);
+    }
+    return _cachedGreeting!;
   }
 
   String _initials() {
@@ -292,16 +431,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
         transitionDuration: const Duration(milliseconds: 420),
       ),
-    ).then((_) => setState(() => _selectedNav = 0));
+    ).then((_) {
+      // Streak-increase celebration is handled in build() via a stream-diff
+      // on userProgressProvider, NOT here. QuizScreen navigates to
+      // ResultScreen via Navigator.pushReplacement, which resolves this
+      // future immediately (with null) the moment the quiz finishes — well
+      // before the user actually returns from the results screen. So this
+      // callback can't reliably know whether the streak went up.
+      setState(() => _selectedNav = 0);
+    });
   }
 
   String _todayString() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
-
-  String _dateString(DateTime dt) =>
-      '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
 
   Future<void> _writeWeakTopicShownDate() async {
     try {
@@ -313,20 +457,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {}
   }
 
-  Future<void> _writeBrokenStreakShownDate() async {
+  Future<void> _markBrokenStreakSeen(String lastActiveDate) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'lastBrokenStreakShownDate': _todayString(),
+        'brokenStreakSeenFor': lastActiveDate,
       }, SetOptions(merge: true));
     } catch (_) {}
   }
 
-  void _showBrokenStreakOverlay(String name) {
-    _writeBrokenStreakShownDate();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) UstuOverlays.showBrokenStreak(context, name: name);
+  void _showBrokenStreakOverlay({
+    required String name,
+    required int lost,
+    required String lastActiveDate,
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final shown = await UstuOverlays.showBrokenStreak(
+        context,
+        name: name,
+        lostStreak: lost,
+        onRestart: () {
+          if (mounted) _showQuizPicker();
+        },
+      );
+      // Marked only once it has really been on screen, so a Home that was
+      // covered before it could open does not use the moment up.
+      if (shown) _markBrokenStreakSeen(lastActiveDate);
     });
   }
 
@@ -337,29 +495,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required String section,
   }) {
     _writeWeakTopicShownDate();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        UstuOverlays.showWeakTopicOverlay(
-          context,
-          topic: topTopic,
-          wrongCount: topCount,
-          exam: exam,
-          section: section,
-          onPracticeNow: () => _openQuiz(
-            exam,
-            section,
-            topic: topTopic,
-            limit: 4,
-            isWeakTopicPractice: true, // ← Bug 2 flag
-          ),
-        );
-      }
-    });
+    // Its only caller is already a post-frame callback. A second one here put
+    // this overlay a frame behind anything raised in the same build, which is
+    // how it ended up opening on top of a streak celebration.
+    if (!mounted) return;
+    UstuOverlays.showWeakTopicOverlay(
+      context,
+      topic: topTopic,
+      wrongCount: topCount,
+      exam: exam,
+      section: section,
+      onPracticeNow: () => _openQuiz(
+        exam,
+        section,
+        topic: topTopic,
+        limit: 4,
+        isWeakTopicPractice: true, // ← Bug 2 flag
+      ),
+    );
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // Read on every build, not only while a celebration is pending, so Home is
+    // always rebuilt the moment a route covering it is popped.
+    final route = ModalRoute.of(context);
     final progressAsync = ref.watch(userProgressProvider);
     final isWeb = MediaQuery.of(context).size.width > 600;
 
@@ -378,17 +539,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       ),
       data: (progressData) {
-        final int streak = progressData?['streak'] as int? ?? 0;
         final String lastActiveDate =
             progressData?['lastActiveDate'] as String? ?? '';
+        // The stored streak is only rewritten when a session ends, so after a
+        // missed day it still holds the old chain. Home shows the live value.
+        final streakNow = streakStatus(
+          storedStreak: (progressData?['streak'] as num?)?.toInt() ?? 0,
+          lastActiveDate: lastActiveDate,
+        );
+        final int streak = streakNow.streak;
         final int solvedToday = progressData?['solvedToday'] as int? ?? 0;
         final double accuracy =
             (progressData?['accuracy'] as num?)?.toDouble() ?? 0.0;
         final bool isNewUser = progressData == null;
+
+        // ── Streak increase → celebrate with the progress map ─────────────
+        // updateStreak() raises pendingStreakCelebration the moment the streak
+        // goes up, whichever screen earned it. Home shows it only while it is
+        // the visible route; if the results screen is still covering it, the
+        // ModalRoute dependency at the top of build() rebuilds Home as soon as
+        // that screen is popped, and the celebration goes out then.
+        if (pendingStreakCelebration.value != null &&
+            (route?.isCurrent ?? true) &&
+            !_celebrationScheduled) {
+          _celebrationScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            _celebrationScheduled = false;
+            final streakToCelebrate = pendingStreakCelebration.value;
+            if (!mounted || streakToCelebrate == null) return;
+            if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+            pendingStreakCelebration.value = null;
+            final shown = await UstuOverlays.showStreakProgressMap(
+              context,
+              currentStreak: streakToCelebrate,
+              isCatchUp: false, // slow, one-step "you just earned this"
+            );
+            // Covered again before it could open: keep it for when Home is
+            // back on top, rather than losing today's celebration.
+            if (!shown &&
+                (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true))) {
+              pendingStreakCelebration.value ??= streakToCelebrate;
+            }
+          });
+        }
         final Map<String, dynamic> sectionMap =
             progressData?['progress'] as Map<String, dynamic>? ?? {};
         final incompleteSession =
             progressData?['incompleteSession'] as Map<String, dynamic>?;
+
+        // ── Selected tests (for tab filtering) ──────────────────────────
+        final selectedTests =
+            (progressData?['selectedTests'] as List?)?.cast<String>() ?? [];
+        // Cache so _showQuizPicker (which lives outside build's data scope) can use it
+        if (_cachedSelectedTests != selectedTests) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() => _cachedSelectedTests = selectedTests);
+          });
+        }
 
         // ── Weak topics ──────────────────────────────────────────────────
         final weakTopics = progressData?['weakTopics'] as Map<String, dynamic>?;
@@ -447,30 +654,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         }
 
         // ── Broken streak ────────────────────────────────────────────────
-        if (!_brokenStreakShown) {
-          final today = _todayString();
-          final yesterday = _dateString(
-            DateTime.now().subtract(const Duration(days: 1)),
-          );
-          final bool broken =
-              streak == 0 &&
-              lastActiveDate.isNotEmpty &&
-              lastActiveDate != today &&
-              lastActiveDate != yesterday;
-          final lastShownBroken =
-              progressData?['lastBrokenStreakShownDate'] as String? ?? '';
-          if (broken && lastShownBroken != today) {
-            _brokenStreakShown = true;
-            _showBrokenStreakOverlay(_firstName());
-          } else {
-            _brokenStreakShown = true;
+        // Once per lapsed chain, not once a day: brokenStreakSeenFor holds the
+        // last active date of the chain already shown, and a new chain has a
+        // new date.
+        if (!_brokenStreakShown && !isNewUser) {
+          _brokenStreakShown = true;
+          final seenFor = progressData['brokenStreakSeenFor'] as String? ?? '';
+          if (streakNow.isBroken && seenFor != lastActiveDate) {
+            _showBrokenStreakOverlay(
+              name: _firstName(),
+              lost: streakNow.lost,
+              lastActiveDate: lastActiveDate,
+            );
           }
         }
 
-        final name = _firstName();
-        if (_cachedGreeting == null || name != 'Student') {
-          _cachedGreeting ??= getGreeting(name);
-        }
+        // Greeting is resolved lazily by _greetingLine at each call site.
 
         if (!_entrancePlayed) {
           _entrancePlayed = true;
@@ -533,7 +732,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ],
                                   _FadeSlide(
                                     animation: _quizAnim ?? _noAnim,
-                                    child: _buildQuizSection(sectionMap),
+                                    child: _buildQuizSection(
+                                      sectionMap,
+                                      selectedTests,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -600,7 +802,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ],
                             _FadeSlide(
                               animation: _quizAnim ?? _noAnim,
-                              child: _buildQuizSection(sectionMap),
+                              child: _buildQuizSection(
+                                sectionMap,
+                                selectedTests,
+                              ),
                             ),
                             const SizedBox(height: 24),
                           ],
@@ -829,7 +1034,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                _cachedGreeting ?? 'Your Ustaad is ready 📚',
+                _greetingLine,
                 style: TextStyle(
                   fontFamily: 'Poppins',
                   color: Colors.white.withOpacity(0.5),
@@ -1136,7 +1341,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _cachedGreeting ?? 'Your Ustaad is ready 📚',
+                  _greetingLine,
                   style: const TextStyle(
                     fontFamily: 'Poppins',
                     color: Colors.white54,
@@ -1193,67 +1398,87 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ? UstaadColors.accent.withOpacity(0.30)
         : UstaadColors.gold.withOpacity(0.28);
 
+    final bool canOpenMap = !isNewUser && streak > 0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor),
-        ),
-        child: Row(
-          children: [
-            Text(
-              msg.isRoast ? '💀' : '🔥',
-              style: const TextStyle(fontSize: 28),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
-                    children: [
-                      Text(
-                        streak.toString(),
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          color: msgColor,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          height: 1,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        'day streak',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          color: msgColor.withOpacity(0.55),
-                          fontSize: 10,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '${msg.emoji}  ${msg.text}',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      color: msgColor.withOpacity(0.85),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (!canOpenMap) return;
+          HapticFeedback.lightImpact();
+          UstuOverlays.showStreakProgressMap(
+            context,
+            currentStreak: streak,
+            isCatchUp: true, // tap-to-view replays the full map up to today
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(
+            children: [
+              Text(
+                msg.isRoast ? '💀' : '🔥',
+                style: const TextStyle(fontSize: 28),
               ),
-            ),
-          ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          streak.toString(),
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: msgColor,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            height: 1,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'day streak',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: msgColor.withOpacity(0.55),
+                            fontSize: 10,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${msg.emoji}  ${msg.text}',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: msgColor.withOpacity(0.85),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (canOpenMap)
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: msgColor.withOpacity(0.4),
+                  size: 22,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1514,7 +1739,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Widget _buildQuizSection(Map<String, dynamic> sectionMap) {
+  /// Exam tabs this student should see. Filtered by id (which is what
+  /// Firestore's selectedTests holds), never by label — NTS is stored as
+  /// 'NAT-NTS' and displayed as 'NTS'.
+  ///
+  /// Falls back to every tab when the filter leaves nothing, which happens
+  /// if selectedTests names an exam we no longer ship. Showing all of them
+  /// is wrong but harmless; an empty list makes clamp(0, -1) throw.
+  List<ExamTab> _visibleTabs(List<String> selectedTests) {
+    if (selectedTests.isEmpty) return _examTabs;
+    final matched = _examTabs
+        .where((t) => selectedTests.contains(t.id))
+        .toList();
+    return matched.isEmpty ? _examTabs : matched;
+  }
+
+  Widget _buildQuizSection(
+    Map<String, dynamic> sectionMap,
+    List<String> selectedTests,
+  ) {
+    final visibleTabs = _visibleTabs(selectedTests);
+    final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1536,10 +1782,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 22),
-            itemCount: _examTabs.length,
+            itemCount: visibleTabs.length,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (context, i) {
-              final selected = i == _selectedExam;
+              final selected = i == safeIndex;
               return GestureDetector(
                 onTap: () => setState(() => _selectedExam = i),
                 child: AnimatedContainer(
@@ -1559,7 +1805,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                   ),
                   child: Text(
-                    _examTabs[i].label,
+                    visibleTabs[i].label,
                     style: TextStyle(
                       fontFamily: 'Poppins',
                       color: selected ? Colors.white : Colors.white54,
@@ -1578,10 +1824,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 250),
             child: _buildQuizGrid(
-              _examTabs[_selectedExam].label,
-              _examTabs[_selectedExam].sections,
+              visibleTabs[safeIndex].label,
+              visibleTabs[safeIndex].sections,
               sectionMap,
-              key: ValueKey(_selectedExam),
+              key: ValueKey(safeIndex),
             ),
           ),
         ),
@@ -1632,90 +1878,126 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         : '${(realProgress * 100).round()}% DONE';
 
     return GestureDetector(
-      onTap: () => _openQuiz(searchExam, s.dbSection),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white10,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.emoji, style: const TextStyle(fontSize: 24)),
-                const SizedBox(height: 10),
-                Text(
-                  s.title,
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
+      onTap: () => s.comingSoon
+          ? _showComingSoon(s)
+          : _openQuiz(searchExam, s.dbSection),
+      child: Opacity(
+        opacity: s.comingSoon ? 0.55 : 1.0,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white10),
+          ),
+          child: Stack(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(s.emoji, style: const TextStyle(fontSize: 24)),
+                  const SizedBox(height: 10),
+                  Text(
+                    s.title,
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  s.weightLabel,
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    color: Colors.white54,
-                    fontSize: 10,
+                  const SizedBox(height: 3),
+                  Text(
+                    s.weightLabel,
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white54,
+                      fontSize: 10,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: LinearProgressIndicator(
-                    value: realProgress,
-                    minHeight: 5,
-                    backgroundColor: Colors.white10,
-                    valueColor: AlwaysStoppedAnimation<Color>(s.barColor),
+                  const SizedBox(height: 10),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: LinearProgressIndicator(
+                      value: realProgress,
+                      minHeight: 5,
+                      backgroundColor: Colors.white10,
+                      valueColor: AlwaysStoppedAnimation<Color>(s.barColor),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  pctText,
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    color: Colors.white.withOpacity(0.4),
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-            if (notStarted)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4CAF50).withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'NEW',
+                  const SizedBox(height: 4),
+                  Text(
+                    pctText,
                     style: TextStyle(
                       fontFamily: 'Poppins',
-                      color: Color(0xFF4CAF50),
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
+                      color: Colors.white.withOpacity(0.4),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
+              ),
+              if (s.comingSoon || notStarted)
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                          (s.comingSoon
+                                  ? UstaadColors.gold
+                                  : const Color(0xFF4CAF50))
+                              .withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      s.comingSoon ? 'SOON' : 'NEW',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: s.comingSoon
+                            ? UstaadColors.gold
+                            : const Color(0xFF4CAF50),
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  /// A subject that is on the paper but not yet in our question bank. Saying
+  /// so plainly beats letting them tap into a quiz with nothing in it.
+  void _showComingSoon(QuizSection s) {
+    HapticService.prominent();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          s.title +
+              ' questions are being written right now. They will appear '
+                  'here as soon as they are ready.',
+          style: const TextStyle(
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.w600,
+            fontSize: 12.5,
+          ),
+        ),
+        backgroundColor: const Color(0xFF1A1464),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -1791,6 +2073,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       isScrollControlled: true,
       builder: (_) => StatefulBuilder(
         builder: (BuildContext context, StateSetter setModalState) {
+          // Both of these have to be read on every rebuild. Hoisting
+          // safeIndex above showModalBottomSheet froze it at whichever exam
+          // was open when the sheet appeared, so tapping NUST-NET moved the
+          // home screen underneath but left the sheet on FAST-NU's subjects.
+          final visibleTabs = _visibleTabs(_cachedSelectedTests);
+          final safeIndex = _selectedExam.clamp(0, visibleTabs.length - 1);
+
+          // targetSdk 36 means Android draws this sheet behind the system
+          // navigation bar, so the last row used to be sliced in half on
+          // tall phones. viewPadding (not padding) survives inside a sheet
+          // route, so take the inset from there and give it back as padding.
+          final bottomInset = MediaQuery.of(context).viewPadding.bottom;
           return Container(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.75,
@@ -1827,10 +2121,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 22),
-                    itemCount: _examTabs.length,
+                    itemCount: visibleTabs.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemBuilder: (_, i) {
-                      final selected = i == _selectedExam;
+                      final selected = i == safeIndex;
                       return GestureDetector(
                         onTap: () {
                           setModalState(() => _selectedExam = i);
@@ -1855,7 +2149,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                           child: Text(
-                            _examTabs[i].label,
+                            visibleTabs[i].label,
                             style: TextStyle(
                               fontFamily: 'Poppins',
                               color: selected ? Colors.white : Colors.white54,
@@ -1872,67 +2166,77 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 Flexible(
                   child: ListView.separated(
                     shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-                    itemCount: _examTabs[_selectedExam].sections.length,
+                    padding: EdgeInsets.fromLTRB(22, 0, 22, 24 + bottomInset),
+                    itemCount: visibleTabs[safeIndex].sections.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, i) {
-                      final s = _examTabs[_selectedExam].sections[i];
-                      final examLabel = _examTabs[_selectedExam].label;
+                      final s = visibleTabs[safeIndex].sections[i];
+                      final examLabel = visibleTabs[safeIndex].label;
                       return GestureDetector(
                         onTap: () {
                           Navigator.pop(context);
+                          if (s.comingSoon) {
+                            _showComingSoon(s);
+                            return;
+                          }
                           String searchExam = examLabel == "NTS-NAT"
                               ? "NTS"
                               : examLabel;
                           _openQuiz(searchExam, s.dbSection);
                         },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white10),
-                          ),
-                          child: Row(
-                            children: [
-                              Text(
-                                s.emoji,
-                                style: const TextStyle(fontSize: 20),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      s.title,
-                                      style: const TextStyle(
-                                        fontFamily: 'Poppins',
-                                        color: Colors.white,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    Text(
-                                      s.weightLabel,
-                                      style: const TextStyle(
-                                        fontFamily: 'Poppins',
-                                        color: Colors.white54,
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ],
+                        child: Opacity(
+                          opacity: s.comingSoon ? 0.55 : 1.0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.07),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white10),
+                            ),
+                            child: Row(
+                              children: [
+                                Text(
+                                  s.emoji,
+                                  style: const TextStyle(fontSize: 20),
                                 ),
-                              ),
-                              const Icon(
-                                Icons.arrow_forward_ios_rounded,
-                                color: Colors.white30,
-                                size: 14,
-                              ),
-                            ],
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        s.title,
+                                        style: const TextStyle(
+                                          fontFamily: 'Poppins',
+                                          color: Colors.white,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        s.weightLabel,
+                                        style: const TextStyle(
+                                          fontFamily: 'Poppins',
+                                          color: Colors.white54,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Icon(
+                                  s.comingSoon
+                                      ? Icons.hourglass_empty_rounded
+                                      : Icons.arrow_forward_ios_rounded,
+                                  color: Colors.white30,
+                                  size: 14,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -2130,7 +2434,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
     );
     _typingAnim = IntTween(
       begin: 0,
-      end: _currentLine.length,
+      end: _currentLine.characters.length,
     ).animate(CurvedAnimation(parent: _typingCtrl, curve: Curves.easeOut));
     _typingAnim.addListener(_updateDisplayedText);
     _typingCtrl.forward();
@@ -2146,7 +2450,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
 
   void _updateDisplayedText() {
     setState(
-      () => _displayedText = _currentLine.substring(0, _typingAnim.value),
+      () => _displayedText = typewriterPrefix(_currentLine, _typingAnim.value),
     );
   }
 
@@ -2156,7 +2460,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
     setState(() => _currentLine = (_lines.toList()..shuffle()).first);
     _typingAnim = IntTween(
       begin: 0,
-      end: _currentLine.length,
+      end: _currentLine.characters.length,
     ).animate(CurvedAnimation(parent: _typingCtrl, curve: Curves.easeOut));
     _typingAnim.removeListener(_updateDisplayedText);
     _typingAnim.addListener(_updateDisplayedText);

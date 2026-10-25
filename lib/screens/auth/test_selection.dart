@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
+import 'package:ustaad/core/notifications/push_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATA MODELS
@@ -18,12 +20,14 @@ class _DegreeOption {
   final String label;
   final String subtitle;
   final IconData icon;
+  final _Stream stream;
 
   const _DegreeOption({
     required this.id,
     required this.label,
     required this.subtitle,
     required this.icon,
+    required this.stream,
   });
 }
 
@@ -34,6 +38,7 @@ class _TestOption {
   final String description;
   final IconData icon;
   final Color accentColor;
+  final _Stream stream;
   final Map<String, List<_Subject>> weightages;
 
   const _TestOption({
@@ -43,6 +48,7 @@ class _TestOption {
     required this.description,
     required this.icon,
     required this.accentColor,
+    required this.stream,
     required this.weightages,
   });
 
@@ -54,36 +60,53 @@ class _TestOption {
 // STATIC DATA
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// A degree and a test each belong to one stream. A medical degree can only sit
+/// with medical tests, and vice versa — before this existed the screen happily
+/// let someone pair CS with MDCAT.
+enum _Stream { engineering, medical }
+
 const _degrees = [
   _DegreeOption(
     id: 'cs_se',
     label: 'CS / Software Engineering',
     subtitle: 'BCS, BSCS, BSSE, BSE',
     icon: Icons.code_rounded,
+    stream: _Stream.engineering,
   ),
   _DegreeOption(
     id: 'electrical_mechanical',
     label: 'Electrical / Mechanical Engg',
     subtitle: 'BSEE, BSME, BSCE, BSIE',
     icon: Icons.settings_rounded,
+    stream: _Stream.engineering,
   ),
   _DegreeOption(
     id: 'business',
     label: 'Business & Management',
     subtitle: 'BBA, MBA, BSBA, BS Management',
     icon: Icons.business_center_rounded,
+    stream: _Stream.engineering,
   ),
   _DegreeOption(
     id: 'fintech',
     label: 'FinTech & Finance',
     subtitle: 'BS Finance, BS FinTech, BBA Finance',
     icon: Icons.account_balance_rounded,
+    stream: _Stream.engineering,
   ),
   _DegreeOption(
     id: 'data_ai',
     label: 'Data Science / AI',
     subtitle: 'BSDS, BSAI, BS Data Engineering',
     icon: Icons.auto_awesome_rounded,
+    stream: _Stream.engineering,
+  ),
+  _DegreeOption(
+    id: 'medical',
+    label: 'MBBS / BDS (Medical)',
+    subtitle: 'Doctor of Medicine, Dental Surgery',
+    icon: Icons.medical_services_rounded,
+    stream: _Stream.medical,
   ),
 ];
 
@@ -95,6 +118,7 @@ final _tests = [
     description: 'NU Entry Test for all FAST campuses',
     icon: Icons.computer_rounded,
     accentColor: const Color(0xFF6C63FF),
+    stream: _Stream.engineering,
     weightages: {
       'cs_se': [
         _Subject('Advanced Mathematics', 0.50),
@@ -135,6 +159,7 @@ final _tests = [
     description: 'NET for Engineering, CS & Sciences',
     icon: Icons.science_rounded,
     accentColor: const Color(0xFF00BCD4),
+    stream: _Stream.engineering,
     weightages: {
       'cs_se': [
         _Subject('Mathematics', 0.50),
@@ -165,6 +190,7 @@ final _tests = [
     description: 'General admissions test across Pakistan',
     icon: Icons.school_rounded,
     accentColor: const Color(0xFFFFD700),
+    stream: _Stream.engineering,
     weightages: {
       'cs_se': [
         _Subject('Mathematics', 0.40),
@@ -185,6 +211,54 @@ final _tests = [
         _Subject('English', 0.35),
         _Subject('Mathematics', 0.35),
         _Subject('Analytical', 0.30),
+      ],
+    },
+  ),
+  _TestOption(
+    id: 'MDCAT',
+    shortName: 'MDCAT',
+    fullName: 'Medical & Dental College Admissions Test',
+    description: 'PMC national entry test for MBBS & BDS admissions',
+    icon: Icons.medical_services_rounded,
+    accentColor: const Color(0xFF4CAF50),
+    stream: _Stream.medical,
+    weightages: {
+      'default': [
+        _Subject('Biology', 0.45),
+        _Subject('Chemistry', 0.25),
+        _Subject('Physics', 0.20),
+        _Subject('English', 0.05),
+        _Subject('Logical Reasoning', 0.05),
+      ],
+      'medical': [
+        _Subject('Biology', 0.45),
+        _Subject('Chemistry', 0.25),
+        _Subject('Physics', 0.20),
+        _Subject('English', 0.05),
+        _Subject('Logical Reasoning', 0.05),
+      ],
+    },
+  ),
+  _TestOption(
+    id: 'NUMS',
+    shortName: 'NUMS',
+    fullName: 'National University of Medical Sciences',
+    description: 'NUMS entry test for MBBS & BDS admissions (Paper-I)',
+    icon: Icons.local_hospital_rounded,
+    accentColor: const Color(0xFF2196F3),
+    stream: _Stream.medical,
+    weightages: {
+      'default': [
+        _Subject('Biology', 0.37),
+        _Subject('Chemistry', 0.265),
+        _Subject('Physics', 0.265),
+        _Subject('English', 0.10),
+      ],
+      'medical': [
+        _Subject('Biology', 0.37),
+        _Subject('Chemistry', 0.265),
+        _Subject('Physics', 0.265),
+        _Subject('English', 0.10),
       ],
     },
   ),
@@ -228,7 +302,6 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
   late final Animation<double> _ustuBounce;
 
   late final AnimationController _btnController;
-  late final Animation<double> _btnFade;
 
   late final AnimationController _cardsController;
   late final List<Animation<Offset>> _cardSlides;
@@ -236,6 +309,28 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
 
   bool get _canContinue =>
       _selectedTestIds.isNotEmpty && _selectedDegreeId != null;
+
+  Widget _buildAnimatedTestCard(int i) {
+    final test = _tests[i];
+    final isSelected = _selectedTestIds.contains(test.id);
+    final subjects = test.subjectsFor(_selectedDegreeId);
+    return SlideTransition(
+      position: _cardSlides[i],
+      child: FadeTransition(
+        opacity: _cardFades[i],
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _TestCard(
+            test: test,
+            isSelected: isSelected,
+            subjects: subjects,
+            showWeightages: _selectedDegreeId != null,
+            onTap: () => _toggleTest(test.id),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -273,30 +368,41 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _btnFade = CurvedAnimation(parent: _btnController, curve: Curves.easeIn);
 
     _cardsController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
+    // Stagger each card's entrance across the controller's 0..1 range.
+    // Each card animates over a 0.55-length window; starts are spread
+    // evenly so the LAST card's window always ends exactly at 1.0 —
+    // this must scale with _tests.length or Interval's end goes past 1.0
+    // and throws (this broke the moment a 4th/5th test was added; the
+    // old hardcoded 0.18 step only ever worked for 3 items).
+    const cardWindow = 0.55;
+    final maxStart = 1.0 - cardWindow;
+    final stepStart = _tests.length > 1 ? maxStart / (_tests.length - 1) : 0.0;
+
     _cardSlides = List.generate(_tests.length, (i) {
-      final start = i * 0.18;
+      final start = (i * stepStart).clamp(0.0, maxStart);
+      final end = (start + cardWindow).clamp(0.0, 1.0);
       return Tween<Offset>(
         begin: const Offset(0.0, 0.45),
         end: Offset.zero,
       ).animate(
         CurvedAnimation(
           parent: _cardsController,
-          curve: Interval(start, start + 0.55, curve: Curves.easeOutCubic),
+          curve: Interval(start, end, curve: Curves.easeOutCubic),
         ),
       );
     });
     _cardFades = List.generate(_tests.length, (i) {
-      final start = i * 0.18;
+      final start = (i * stepStart).clamp(0.0, maxStart);
+      final end = (start + cardWindow).clamp(0.0, 1.0);
       return Tween<double>(begin: 0, end: 1).animate(
         CurvedAnimation(
           parent: _cardsController,
-          curve: Interval(start, start + 0.55, curve: Curves.easeOut),
+          curve: Interval(start, end, curve: Curves.easeOut),
         ),
       );
     });
@@ -343,9 +449,31 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
       _degreeSheetOpen = false;
       _degreeSearch = '';
       _degreeSearchController.clear();
+
+      // Switching stream invalidates anything ticked in the other one. Without
+      // this, picking NET first and then a medical degree would leave NET
+      // quietly selected and saved against an MBBS profile.
+      final stream = _degrees.firstWhere((d) => d.id == id).stream;
+      _selectedTestIds.removeWhere(
+        (testId) => _tests.firstWhere((t) => t.id == testId).stream != stream,
+      );
     });
     _ustuController.forward(from: 0);
   }
+
+  /// Stream implied by the chosen degree, or null while none is chosen.
+  _Stream? get _selectedStream => _selectedDegree?.stream;
+
+  /// Sections are derived from the data rather than listed by hand. The old
+  /// screen called _buildAnimatedTestCard(0..3) explicitly, so NUMS — added to
+  /// the data as index 4 — was never rendered at all.
+  List<_TestOption> _testsIn(_Stream stream) =>
+      _tests.where((t) => t.stream == stream).toList();
+
+  /// Before a degree is picked, show everything. After, show only the matching
+  /// stream so an impossible pairing cannot be built in the first place.
+  bool _showsStream(_Stream stream) =>
+      _selectedStream == null || _selectedStream == stream;
 
   // ─────────────────────────────────────────────────────────────────────────
   // _continue — handles BOTH onboarding (isEditing=false) and profile edit
@@ -455,6 +583,16 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
           'testWeightages': testWeightages,
           'testSelectedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+
+        // Exam choice is the only segmentation worth having here: NET students
+        // and NTS students behave nothing alike, and every later report reads
+        // through it. Topics are what keep a broadcast on the students it
+        // applies to — an MDCAT announcement sent to every install is how
+        // people uninstall.
+        final exams = _selectedTestIds.toList();
+        Analytics.instance.examsSelected(exams);
+        Analytics.instance.setSelectedExams(exams);
+        PushService.instance.syncTopics(exams);
 
         // ── Edit mode: clear exam-specific data that is now stale ────────
         // weakTopics and incompleteSession are tied to the old exam/sections.
@@ -641,41 +779,29 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
 
                             const SizedBox(height: 28),
 
-                            // ── Test cards ───────────────────────────
-                            _SectionLabel(
-                              label: 'Entry Tests',
-                              note: 'Select all that apply',
-                            ),
-                            const SizedBox(height: 10),
+                            // ── Engineering & CS section ──────────────
+                            if (_showsStream(_Stream.engineering)) ...[
+                              _SectionLabel(
+                                label: '🎓 Engineering & CS',
+                                note: 'Select all that apply',
+                              ),
+                              const SizedBox(height: 10),
+                              for (final t in _testsIn(_Stream.engineering))
+                                _buildAnimatedTestCard(_tests.indexOf(t)),
+                              const SizedBox(height: 4),
+                            ],
 
-                            ...List.generate(_tests.length, (i) {
-                              final test = _tests[i];
-                              final isSelected = _selectedTestIds.contains(
-                                test.id,
-                              );
-                              final subjects = test.subjectsFor(
-                                _selectedDegreeId,
-                              );
-
-                              return SlideTransition(
-                                position: _cardSlides[i],
-                                child: FadeTransition(
-                                  opacity: _cardFades[i],
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(bottom: 14),
-                                    child: _TestCard(
-                                      test: test,
-                                      isSelected: isSelected,
-                                      subjects: subjects,
-                                      showWeightages: _selectedDegreeId != null,
-                                      onTap: () => _toggleTest(test.id),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }),
-
-                            const SizedBox(height: 8),
+                            // ── Medical section ───────────────────────
+                            if (_showsStream(_Stream.medical)) ...[
+                              _SectionLabel(
+                                label: '🏥 Medical',
+                                note: 'Select all that apply',
+                              ),
+                              const SizedBox(height: 10),
+                              for (final t in _testsIn(_Stream.medical))
+                                _buildAnimatedTestCard(_tests.indexOf(t)),
+                              const SizedBox(height: 8),
+                            ],
                           ],
                         ),
                       ),

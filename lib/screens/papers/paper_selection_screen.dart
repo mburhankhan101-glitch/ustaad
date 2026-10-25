@@ -3,16 +3,19 @@
 // Top navbar removed – content starts directly.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/models/paper_model.dart';
+import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/home/home_screen.dart'; // UstaadColors
 import 'package:ustaad/screens/papers/program/program_selection_screen.dart';
 
-class PaperSelectionScreen extends StatelessWidget {
+class PaperSelectionScreen extends ConsumerWidget {
   const PaperSelectionScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isWeb = MediaQuery.of(context).size.width > 600;
+    final selectedTestsAsync = ref.watch(selectedTestsProvider);
 
     return Scaffold(
       // No backgroundColor needed – gradient covers everything
@@ -31,31 +34,52 @@ class PaperSelectionScreen extends StatelessWidget {
             stops: [0.0, 0.5, 1.0],
           ),
         ),
-        child: isWeb
-            ? SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 24,
-                ),
-                child: _buildWebContent(context),
-              )
-            : SafeArea(
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 8,
-                  ),
-                  child: _buildMobileContent(context),
-                ),
-              ),
+        child: selectedTestsAsync.when(
+          // Loading and error both fail open to the engineering/CS bucket —
+          // it's the larger, more-built-out set, and a brief flash of the
+          // "wrong" bucket for a split second beats a blank screen while
+          // the one Firestore read resolves.
+          loading: () => const Center(
+            child: CircularProgressIndicator(color: Colors.white54),
+          ),
+          error: (_, __) => _buildContent(context, isWeb, isMedical: false),
+          data: (selectedTests) => _buildContent(
+            context,
+            isWeb,
+            isMedical: isMedicalSelection(selectedTests),
+          ),
+        ),
       ),
     );
   }
 
-  // ── Mobile layout (unchanged) ─────────────────────────────────────────
-  Widget _buildMobileContent(BuildContext context) {
+  Widget _buildContent(
+    BuildContext context,
+    bool isWeb, {
+    required bool isMedical,
+  }) {
+    return isWeb
+        ? SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            child: _buildWebContent(context, isMedical),
+          )
+        : SafeArea(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              // Extra bottom padding (not just vertical: 8) because the
+              // bottom nav bar sits as an overlay outside this screen's
+              // own SafeArea — Flutter doesn't know to reserve space for
+              // it, so without this the last card gets clipped and the
+              // scroll view stops short of fully revealing it.
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 100),
+              child: _buildMobileContent(context, isMedical),
+            ),
+          );
+  }
+
+  // ── Mobile layout ────────────────────────────────────────────────────
+  Widget _buildMobileContent(BuildContext context, bool isMedical) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -83,21 +107,28 @@ class PaperSelectionScreen extends StatelessWidget {
           ),
         ),
         Column(
-          children: [
-            _buildPaperCard(context, fastPaperCard(context)),
-            const SizedBox(height: 16),
-            _buildPaperCard(context, nustPaperCard(context)),
-            const SizedBox(height: 16),
-            _buildPaperCard(context, ntsPaperCard(context)),
-            const SizedBox(height: 40),
-          ],
+          children: isMedical
+              ? [
+                  _buildPaperCard(context, mdcatPaperCard(context)),
+                  const SizedBox(height: 16),
+                  _buildPaperCard(context, numsPaperCard(context)),
+                  const SizedBox(height: 40),
+                ]
+              : [
+                  _buildPaperCard(context, fastPaperCard(context)),
+                  const SizedBox(height: 16),
+                  _buildPaperCard(context, nustPaperCard(context)),
+                  const SizedBox(height: 16),
+                  _buildPaperCard(context, ntsPaperCard(context)),
+                  const SizedBox(height: 40),
+                ],
         ),
       ],
     );
   }
 
-  // ── Web content: three cards side by side ─────────────────────────────
-  Widget _buildWebContent(BuildContext context) {
+  // ── Web content ──────────────────────────────────────────────────────
+  Widget _buildWebContent(BuildContext context, bool isMedical) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -120,16 +151,30 @@ class PaperSelectionScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 32),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: _buildPaperCard(context, fastPaperCard(context))),
-            const SizedBox(width: 20),
-            Expanded(child: _buildPaperCard(context, nustPaperCard(context))),
-            const SizedBox(width: 20),
-            Expanded(child: _buildPaperCard(context, ntsPaperCard(context))),
-          ],
-        ),
+        if (isMedical)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _buildPaperCard(context, mdcatPaperCard(context)),
+              ),
+              const SizedBox(width: 20),
+              Expanded(child: _buildPaperCard(context, numsPaperCard(context))),
+              const SizedBox(width: 20),
+              const Expanded(child: SizedBox()),
+            ],
+          )
+        else
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _buildPaperCard(context, fastPaperCard(context))),
+              const SizedBox(width: 20),
+              Expanded(child: _buildPaperCard(context, nustPaperCard(context))),
+              const SizedBox(width: 20),
+              Expanded(child: _buildPaperCard(context, ntsPaperCard(context))),
+            ],
+          ),
         const SizedBox(height: 40),
       ],
     );
@@ -185,6 +230,48 @@ class PaperSelectionScreen extends StatelessWidget {
         builder: (_) => const ProgramSelectionScreen(
           examType: ExamType.nts,
           userProgram: UserProgram.ntsCS,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData mdcatPaperCard(BuildContext context) => _PaperCardData(
+    title: 'MDCAT (Medical/Dental)',
+    duration: '180 mins',
+    marks: '180 marks',
+    tags: const [
+      '81 Biology',
+      '45 Chemistry',
+      '36 Physics',
+      '9 English',
+      '9 Logical Reasoning',
+    ],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF00BFA5),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.mdcat,
+          userProgram: UserProgram.mdcatMedical,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData numsPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NUMS MDCAT (Paper-I)',
+    duration: '165 mins',
+    marks: '150 marks',
+    tags: const ['55 Biology', '40 Chemistry', '40 Physics', '15 English'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF2196F3),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.numsMdcat,
+          userProgram: UserProgram.numsMedical,
         ),
       ),
     ),

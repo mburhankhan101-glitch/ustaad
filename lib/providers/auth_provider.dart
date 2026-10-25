@@ -521,7 +521,6 @@ class AuthWrapper extends ConsumerWidget {
         );
 
       case AuthStatus.unauthenticated:
-      default:
         return const LoginScreen();
     }
   }

@@ -140,7 +140,7 @@ class _NtsPaperScreenState extends ConsumerState<NtsPaperScreen> {
                 .read(paperSessionProvider.notifier)
                 .startPaper(
                   widget.examType,
-                  uid: FirebaseAuth.instance.currentUser!.uid,
+                  uid: FirebaseAuth.instance.currentUser?.uid ?? '',
                 );
           },
         ),
@@ -150,7 +150,10 @@ class _NtsPaperScreenState extends ConsumerState<NtsPaperScreen> {
     final sessionAsync = ref.watch(paperSessionProvider);
 
     ref.listen<AsyncValue<PaperSessionState?>>(paperSessionProvider, (_, next) {
-      final session = next.value;
+      // valueOrNull, not value: on an AsyncError the value getter rethrows,
+      // and a listener is the worst place for that — the throw lands in the
+      // framework with no call site to catch it.
+      final session = next.valueOrNull;
       if (session != null && session.isSubmitted) {
         final result = ref.read(paperSessionProvider.notifier).buildResult();
         if (result != null) {

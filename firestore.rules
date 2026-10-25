@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// Ustaad Firestore security rules.
+//
+// Kept in the repo so changes are reviewable and can be rolled back. Deploy
+// with `firebase deploy --only firestore:rules`, or paste into
+// Firebase console → Firestore Database → Rules → Publish.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Question bank ───────────────────────────────────────────────────────
+    // Read-only to the app. Content is uploaded by the extractor with an admin
+    // service account, which bypasses these rules entirely.
+    //
+    // Note for later: when anonymous auth ships, anonymous users still satisfy
+    // `request.auth != null`, so this rule keeps working unchanged.
+    match /questions/{questionId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ── Content version marker ──────────────────────────────────────────────
+    // A single document, `meta/content`, holding `questionsVersion` (a number).
+    // The app reads it once per session and refreshes its cached questions only
+    // when the number changes, instead of re-downloading whole sections from
+    // the server on every launch.
+    //
+    // Bump it after every extractor upload, or devices will keep serving the
+    // questions they already have and never see new content.
+    match /meta/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ── User documents ──────────────────────────────────────────────────────
+    // Rules do NOT cascade into subcollections. The previous version matched
+    // only /users/{userId}, so every read and write to
+    // users/{uid}/seenQuestions/{sectionKey} was denied — and because the app
+    // swallows those errors, the "don't repeat questions I've seen" feature
+    // failed silently instead of erroring.
+    //
+    // The nested recursive wildcard fixes that: the outer match covers the
+    // user document, the inner one covers everything beneath it, both scoped
+    // to the owner.
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // ── Feedback ────────────────────────────────────────────────────────────
+    // Users may submit feedback and, because these documents carry their name
+    // and email, read and delete their own. They cannot edit it after the
+    // fact, and cannot see anyone else's.
+    //
+    // The create check pins userId to the caller so feedback cannot be
+    // submitted in someone else's name.
+    match /feedback/{docId} {
+      allow create: if signedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() <= 5000;
+
+      // Read is needed so account deletion can find the caller's own documents
+      // to remove. The query in AccountDeletionService filters on userId, which
+      // is what makes this rule satisfiable.
+      allow read, delete: if signedIn()
+                          && resource.data.userId == request.auth.uid;
+
+      allow update: if false;
+    }
+
+    // ── Contact messages ────────────────────────────────────────────────────
+    // Open to anyone, because the contact form on the website is used by people
+    // who are not signed in. Nobody can read them back.
+    //
+    // The size caps are the only defence against someone scripting junk into
+    // the collection, so keep them.
+    match /contacts/{docId} {
+      allow create: if request.resource.data.message is string
+                    && request.resource.data.message.size() <= 5000
+                    && request.resource.data.email is string
+                    && request.resource.data.email.size() <= 320;
+
+      allow read, update, delete: if false;
+    }
+
+    // ── Account deletion requests ───────────────────────────────────────────
+    // Google Play requires the web deletion page to work without installing the
+    // app or signing in, so creation has to be open. Nobody can read the queue
+    // back from the client; work it from the Firebase console.
+    match /deletionRequests/{docId} {
+      allow create: if request.resource.data.email is string
+                    && request.resource.data.email.size() <= 320
+                    && request.resource.data.status == 'pending';
+
+      allow read, update, delete: if false;
+    }
+  }
+}

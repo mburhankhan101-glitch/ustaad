@@ -10,6 +10,8 @@ class Question {
   final int correctIndex;
   final String section;
   final String exam;
+  final List<String>
+  exams; // full tag list, e.g. ["NUST-NET", "MDCAT"] — kept for pooled sections
   final String topic;
   final int year;
   final String difficulty;
@@ -23,6 +25,7 @@ class Question {
     required this.correctIndex,
     required this.section,
     required this.exam,
+    required this.exams,
     required this.topic,
     required this.year,
     required this.difficulty,
@@ -41,6 +44,12 @@ class Question {
       exam: (data['exams'] as List?)?.isNotEmpty == true
           ? data['exams'][0].toString()
           : (data['exam']?.toString() ?? 'N/A'),
+
+      // ── Full tag list, needed for pooled sections (MDCAT/NUMS Physics & English
+      // pull from NUST-NET/NTS questions, so we need to know all exams a question belongs to) ──
+      exams:
+          (data['exams'] as List?)?.map((e) => e.toString()).toList() ??
+          (data['exam'] != null ? [data['exam'].toString()] : []),
 
       section: data['section']?.toString() ?? "General",
 

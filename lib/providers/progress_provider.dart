@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,38 +45,156 @@ final userProgressProvider = StreamProvider<Map<String, dynamic>?>((
 //   - Any older date / never set  → streak resets to 1 (today counts)
 //   - Also keeps longestStreak up to date
 
-Future<void> updateStreak() async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return;
+/// The result of counting today towards a streak.
+class StreakUpdate {
+  final int previous;
+  final int streak;
+  final int longest;
 
-  final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
-  final snapshot = await doc.get();
-  final data = snapshot.data() ?? {};
+  const StreakUpdate({
+    required this.previous,
+    required this.streak,
+    required this.longest,
+  });
 
-  final today = _dateString(DateTime.now());
-  final lastActive = data['lastActiveDate'] as String? ?? '';
-  final currentStreak = data['streak'] as int? ?? 0;
-  final longestStreak = data['longestStreak'] as int? ?? 0;
+  /// Whether this deserves the progress map: the chain got longer.
+  ///
+  /// A reset to 1 after missing days is not an increase; that student sees the
+  /// broken streak overlay instead.
+  bool get increased => streak > previous;
+}
 
-  // Already practiced today — nothing to update
-  if (lastActive == today) return;
+/// Works out what today does to a streak, without touching Firestore.
+///
+/// Returns null when today has already been counted.
+StreakUpdate? computeStreakUpdate({
+  required String lastActiveDate,
+  required int currentStreak,
+  required int longestStreak,
+  required DateTime now,
+}) {
+  final today = _dateString(now);
+  if (lastActiveDate == today) return null;
 
-  final yesterday = _dateString(
-    DateTime.now().subtract(const Duration(days: 1)),
-  );
-  final int newStreak = lastActive == yesterday
+  final yesterday = _dateString(now.subtract(const Duration(days: 1)));
+  final int newStreak = lastActiveDate == yesterday
       ? currentStreak +
             1 // kept the chain alive
       : 1; // missed a day (or first ever session), reset to 1
 
-  final int newLongest = newStreak > longestStreak ? newStreak : longestStreak;
+  return StreakUpdate(
+    previous: currentStreak,
+    streak: newStreak,
+    longest: max(newStreak, longestStreak),
+  );
+}
 
-  await doc.set({
-    'streak': newStreak,
-    'lastActiveDate': today,
-    'longestStreak': newLongest,
+/// A streak as it stands right now, worked out from what was last stored.
+///
+/// The stored streak only changes when a session is finished, so a student who
+/// stops practising keeps their old number in Firestore until they come back.
+/// Read as it was, that number showed a chain alive days after it had ended,
+/// and the broken streak moment, which waited for a stored 0 that nothing ever
+/// wrote, could not happen at all.
+class StreakStatus {
+  /// The streak to show: the stored one while it is alive, 0 once it is not.
+  final int streak;
+
+  /// How long the chain was when it lapsed, or 0 if it has not.
+  final int lost;
+
+  /// Whether the student had practised before and has since missed a day.
+  final bool isBroken;
+
+  const StreakStatus({
+    required this.streak,
+    required this.lost,
+    required this.isBroken,
+  });
+}
+
+StreakStatus streakStatus({
+  required int storedStreak,
+  required String lastActiveDate,
+  DateTime? now,
+}) {
+  final at = now ?? DateTime.now();
+  final alive =
+      lastActiveDate.isEmpty ||
+      lastActiveDate == _dateString(at) ||
+      lastActiveDate == _dateString(at.subtract(const Duration(days: 1)));
+  if (alive) {
+    return StreakStatus(streak: storedStreak, lost: 0, isBroken: false);
+  }
+  return StreakStatus(streak: 0, lost: storedStreak, isBroken: true);
+}
+
+/// A streak celebration waiting for Home to show it.
+///
+/// Set by updateStreak() the moment the streak goes up, and cleared by
+/// whichever HomeScreen shows the progress map. It lives outside any widget
+/// because the screen that earns the streak is never the one that celebrates
+/// it. Home used to spot the increase by comparing each Firestore emission
+/// with the last value it had seen, but after a past paper the results screen
+/// returns to a brand new HomeScreen, which took the already raised streak as
+/// its starting point and so never saw it go up at all.
+final ValueNotifier<int?> pendingStreakCelebration = ValueNotifier<int?>(null);
+
+/// Counts today towards the signed in student's streak.
+///
+/// Reads the user document from the local cache first. Home keeps a live
+/// listener on that document, so the cache is already current, whereas the old
+/// server read was a full network round trip the celebration had to wait
+/// behind; on a slow connection the student was back on Home before the new
+/// streak existed. Only when nothing is cached does it ask the server.
+///
+/// The celebration is raised as soon as the write is made, not when the server
+/// acknowledges it. Firestore applies the write locally straight away and
+/// syncs it when it can, including after coming back online.
+Future<StreakUpdate?> updateStreak() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return null;
+
+  final doc = FirebaseFirestore.instance.collection('users').doc(user.uid);
+
+  DocumentSnapshot<Map<String, dynamic>> snapshot;
+  try {
+    snapshot = await doc.get(const GetOptions(source: Source.cache));
+    if (!snapshot.exists) snapshot = await doc.get();
+  } catch (_) {
+    try {
+      snapshot = await doc.get();
+    } catch (e) {
+      debugPrint('[Streak] could not read the user document: $e');
+      return null;
+    }
+  }
+
+  final data = snapshot.data() ?? {};
+  final now = DateTime.now();
+  final update = computeStreakUpdate(
+    lastActiveDate: data['lastActiveDate'] as String? ?? '',
+    currentStreak: (data['streak'] as num?)?.toInt() ?? 0,
+    longestStreak: (data['longestStreak'] as num?)?.toInt() ?? 0,
+    now: now,
+  );
+  if (update == null) return null; // already practised today
+
+  final write = doc.set({
+    'streak': update.streak,
+    'lastActiveDate': _dateString(now),
+    'longestStreak': update.longest,
   }, SetOptions(merge: true));
   // merge: true so we never wipe totalSolved, accuracy, progress etc.
+
+  if (update.increased) pendingStreakCelebration.value = update.streak;
+
+  try {
+    await write;
+  } catch (e) {
+    debugPrint('[Streak] streak write failed: $e');
+  }
+  return update;
 }
 
 // ─── Streak message helper ────────────────────────────────────────────────────
@@ -213,7 +333,7 @@ class StreakMessage {
 // Add more lines to any list freely; the random picker handles the rest.
 
 const List<String> _morningLines = [
-  'Uth bhi jao [Name], 5 baje Ustu bhi so raha hai, tum kyun jag rahe? Padhai karo.',
+  'Uth bhi jao [Name], 5 baje to Ustu bhi so raha hai.',
   'Chai pi li [Name]? Ab bahana khatam, FAST-NU nahi maanta neend.',
   'Good morning [Name], ghar walon ki umeed jagi ya abhi bhi snooze maar rahi?',
   '[Name] uth jao, Ustu bol raha hai aaj streak break nahi karni.',

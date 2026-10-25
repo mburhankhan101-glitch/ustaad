@@ -38,20 +38,48 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
+    // Whether this account has already picked its exams lives in Firestore,
+    // so the answer is supposed to survive a reinstall or a new phone. Two
+    // things used to go wrong on the way to reading it, and both ended with
+    // a returning student being asked to pick their degree all over again:
+    //
+    //   • A bare get() falls back to the local cache when the backend can't
+    //     be reached. On a fresh install that cache is empty, so the snapshot
+    //     comes back with exists == false — indistinguishable from a user who
+    //     genuinely never chose anything.
+    //   • On a flaky connection it throws [cloud_firestore/unavailable]
+    //     instead. Nothing caught it, so login died on the spot.
+    //
+    // So ask the server explicitly and only act on a definite answer. If we
+    // can't get one, send them home: a returning user keeps their setup, and
+    // anyone who really hasn't chosen is still routed here from signup and
+    // from email verification.
+    final users = FirebaseFirestore.instance.collection('users');
+    bool? hasSelectedTest;
+
+    try {
+      final doc = await users
+          .doc(user.uid)
+          .get(const GetOptions(source: Source.server));
+      hasSelectedTest = doc.exists && doc.data()?['selectedTests'] != null;
+    } catch (_) {
+      try {
+        final cached = await users
+            .doc(user.uid)
+            .get(const GetOptions(source: Source.cache));
+        // Only a positive cache hit means anything here. A cache miss says
+        // nothing at all about what the server holds.
+        if (cached.exists && cached.data()?['selectedTests'] != null) {
+          hasSelectedTest = true;
+        }
+      } catch (_) {
+        // Still unknown — fall through and treat it as "probably set up".
+      }
+    }
 
     if (!mounted) return;
 
-    final hasSelectedTest = doc.exists && doc.data()?['selectedTests'] != null;
-
-    if (hasSelectedTest) {
-      context.go('/home');
-    } else {
-      context.go('/test_selection');
-    }
+    context.go(hasSelectedTest == false ? '/test_selection' : '/home');
   }
 
   // ── Email sign in ─────────────────────────────────────────────────────────

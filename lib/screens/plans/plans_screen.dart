@@ -1,11 +1,106 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  PlansScreen — Redesigned Paywall
-//  Inspired by: Duolingo (plan cards), Mondly (benefit chips), EWA (hero),
-//               Quizlet (clear CTA hierarchy)
-//  Brand: Ustaad — #0A0E2E → #1A1464 → #6C63FF gradient, Poppins, Gold #FFD700
+//  PlansScreen: the Ustaad Pro paywall
+//
+//  The rest of the app lives in indigo and violet. Pro should feel like a step
+//  up from that rather than more of it, so this screen switches to the colour
+//  opposite: a warm midnight ground lit in champagne and amber, the gold of
+//  Ustu's crown. Indigo stays only as a faint glow at the top edge, so the
+//  screen still belongs to the same app.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// The Pro palette. Used on this screen only.
+abstract final class _Pro {
+  static const ink = Color(0xFF0C0A18);
+  static const dusk = Color(0xFF1F1533);
+  static const champagne = Color(0xFFF2D59B);
+  static const paleGold = Color(0xFFF8E4B6);
+  static const amber = Color(0xFFDDA24F);
+  static const cream = Color(0xFFFFF6E6);
+  static const coral = Color(0xFFFF8A6B);
+  static const mist = Color(0xFFB4AEC8);
+}
+
+enum _Plan { monthly, credits }
+
+class _PlanInfo {
+  final String tag;
+  final String title;
+  final String price;
+  final String detail;
+  final String cta;
+  final String finePrint;
+
+  const _PlanInfo({
+    required this.tag,
+    required this.title,
+    required this.price,
+    required this.detail,
+    required this.cta,
+    required this.finePrint,
+  });
+}
+
+const _plans = {
+  _Plan.monthly: _PlanInfo(
+    tag: 'UNLIMITED',
+    title: 'Pro Monthly',
+    price: 'PKR 399',
+    detail: 'a month, about PKR 13 a day',
+    cta: 'Get Pro',
+    finePrint: 'Cancel anytime.',
+  ),
+  _Plan.credits: _PlanInfo(
+    tag: 'NO EXPIRY',
+    title: 'Credit Pack',
+    price: 'PKR 249',
+    detail: '50 credits, pay once',
+    cta: 'Get 50 credits',
+    finePrint: 'Spend credits on explanations, quizzes and papers.',
+  ),
+};
+
+class _Benefit {
+  final IconData icon;
+  final String title;
+  final String detail;
+
+  /// What the free plan gets instead, shown struck through.
+  final String free;
+
+  const _Benefit(this.icon, this.title, this.detail, this.free);
+}
+
+const _benefits = [
+  _Benefit(
+    Icons.auto_awesome_rounded,
+    'Unlimited explanations',
+    'English and Urdu, at priority speed',
+    '5 a day',
+  ),
+  _Benefit(
+    Icons.bolt_rounded,
+    'Unlimited quizzes',
+    'Any section, as often as you like',
+    '10 a day',
+  ),
+  _Benefit(
+    Icons.article_outlined,
+    'Every full past paper',
+    'Complete papers, not just sections',
+    '2 a month',
+  ),
+  _Benefit(
+    Icons.track_changes_rounded,
+    'Custom tests on weak topics',
+    'Detailed analytics on what costs you marks',
+    'Basic',
+  ),
+];
 
 class PlansScreen extends StatefulWidget {
   const PlansScreen({super.key});
@@ -16,922 +111,705 @@ class PlansScreen extends StatefulWidget {
 
 class _PlansScreenState extends State<PlansScreen>
     with TickerProviderStateMixin {
-  String _selected = 'monthly';
+  _Plan _selected = _Plan.monthly;
 
-  // Glow behind Ustu owl — slow breathe in/out
-  late final AnimationController _glowController;
-  late final Animation<double> _glowAnim;
+  /// One entrance for the whole screen, each part on its own slice of it.
+  late final AnimationController _entrance = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  );
 
-  // CTA button gentle pulse — draws the eye without being annoying
-  late final AnimationController _ctaController;
-  late final Animation<double> _ctaScaleAnim;
+  /// Ustu's slow float and the glow behind him.
+  late final AnimationController _ambient = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 3600),
+  );
+
+  late final Animation<double> _heroIn = _phase(0.0, 0.55);
+  late final Animation<double> _titleIn = _phase(0.12, 0.6);
+  late final Animation<double> _plansIn = _phase(0.3, 0.75);
+  late final List<Animation<double>> _benefitsIn = [
+    for (var i = 0; i < _benefits.length; i++)
+      _phase(0.42 + i * 0.06, 0.78 + i * 0.06),
+  ];
+  late final Animation<double> _ctaIn = _phase(0.5, 0.95);
+
+  bool _started = false;
+
+  Animation<double> _phase(double begin, double end) => CurvedAnimation(
+    parent: _entrance,
+    curve: Interval(begin, end, curve: Curves.easeOutCubic),
+  );
 
   @override
   void initState() {
     super.initState();
+    // Counts how many people reach the paywall at all. Against quiz_finished
+    // it says whether nobody wants to pay, or nobody is getting this far —
+    // two very different problems with two very different fixes.
+    Analytics.instance.paywallViewed(source: 'plans_screen');
+  }
 
-    _glowController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2200),
-    )..repeat(reverse: true);
-
-    _glowAnim = Tween<double>(begin: 0.25, end: 0.75).animate(
-      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
-    );
-
-    _ctaController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    )..repeat(reverse: true);
-
-    _ctaScaleAnim = Tween<double>(
-      begin: 1.0,
-      end: 1.045,
-    ).animate(CurvedAnimation(parent: _ctaController, curve: Curves.easeInOut));
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _entrance.value = 1;
+    } else {
+      _entrance.forward();
+      _ambient.repeat(reverse: true);
+    }
   }
 
   @override
   void dispose() {
-    _glowController.dispose();
-    _ctaController.dispose();
+    _entrance.dispose();
+    _ambient.dispose();
     super.dispose();
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  ROOT BUILD
-  // ═══════════════════════════════════════════════════════════════════════════
+  void _select(_Plan plan) {
+    if (plan == _selected) return;
+    HapticFeedback.selectionClick();
+    setState(() => _selected = plan);
+  }
+
+  void _continue() {
+    // TODO: wire to RevenueCat purchase flow
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Payment coming soon! 🚀',
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            color: _Pro.ink,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        backgroundColor: _Pro.champagne,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0A0E2E), Color(0xFF1A1464), Color(0xFF6C63FF)],
-          ),
-        ),
-        child: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              _buildTopBar(context),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    children: [
-                      const SizedBox(height: 6),
-                      _buildHero(),
-                      const SizedBox(height: 16),
-                      _buildSocialProof(),
-                      const SizedBox(height: 20),
-                      _buildBenefitChips(),
-                      const SizedBox(height: 26),
-                      _buildComparisonTable(),
-                      const SizedBox(height: 26),
-                      _buildToggle(),
-                      const SizedBox(height: 14),
-                      _buildPricingCard(),
-                      const SizedBox(height: 10),
-                      _buildMaybeLater(context),
-                      SizedBox(
-                        height: MediaQuery.of(context).padding.bottom + 28,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+    final plan = _plans[_selected]!;
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  TOP BAR
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildTopBar(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 20, 0),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(
-              Icons.arrow_back_ios_new_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
-          const Expanded(
-            child: Text(
-              'Choose Your Plan',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(width: 44), // balance back button
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  HERO — Ustu with golden ring, PRO badge, sparkles, animated glow
-  //  Inspired by EWA's large character hero section
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildHero() {
-    return Column(
-      children: [
-        Center(
-          // Fixed-size container so Positioned sparkles are predictable
-          child: SizedBox(
-            width: 200,
-            height: 130,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                // ── Animated glow blob behind owl ──────────────────────────
-                Positioned(
-                  left: 45,
-                  top: 5,
-                  child: AnimatedBuilder(
-                    animation: _glowAnim,
-                    builder: (_, __) => Container(
-                      width: 110,
-                      height: 110,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(
-                              0xFF6C63FF,
-                            ).withOpacity(_glowAnim.value),
-                            blurRadius: 50,
-                            spreadRadius: 18,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: _Pro.ink,
+        body: Stack(
+          children: [
+            const Positioned.fill(child: _Backdrop()),
+            SafeArea(
+              child: Column(
+                children: [
+                  const _TopBar(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(22, 0, 22, 20),
+                      child: _Column(
+                        children: [
+                          _Reveal(
+                            animation: _heroIn,
+                            lift: 0,
+                            scaleFrom: 0.9,
+                            child: _Hero(ambient: _ambient),
                           ),
+                          const SizedBox(height: 4),
+                          _Reveal(animation: _titleIn, child: const _Headline()),
+                          const SizedBox(height: 24),
+                          // Plans before benefits, so both options and their
+                          // prices are on the first screen of a normal phone.
+                          _Reveal(
+                            animation: _plansIn,
+                            child: _PlanPicker(
+                              selected: _selected,
+                              onSelect: _select,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          _BenefitList(rows: _benefitsIn),
                         ],
                       ),
                     ),
                   ),
-                ),
+                  _Reveal(
+                    animation: _ctaIn,
+                    child: _BottomPanel(plan: plan, onContinue: _continue),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
-                // ── Golden ring border ──────────────────────────────────────
-                Positioned(
-                  left: 48,
-                  top: 8,
-                  child: Container(
-                    width: 104,
-                    height: 104,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Color(0xFFFFD700), Color(0xFFFF9500)],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFFD700).withOpacity(0.35),
-                          blurRadius: 22,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(3),
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFF2D27A8), Color(0xFF6C63FF)],
-                        ),
-                      ),
-                      child: const Center(
-                        child: Text('🦉', style: TextStyle(fontSize: 46)),
-                      ),
+/// Centres content and keeps it phone-width on tablets and the web.
+class _Column extends StatelessWidget {
+  final List<Widget> children;
+  const _Column({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Column(mainAxisSize: MainAxisSize.min, children: children),
+      ),
+    );
+  }
+}
+
+class _Reveal extends StatelessWidget {
+  final Animation<double> animation;
+  final Widget child;
+  final double lift;
+  final double scaleFrom;
+
+  const _Reveal({
+    required this.animation,
+    required this.child,
+    this.lift = 18,
+    this.scaleFrom = 1,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      child: child,
+      builder: (_, child) {
+        final t = animation.value;
+        Widget moved = Transform.translate(
+          offset: Offset(0, lift * (1 - t)),
+          child: child,
+        );
+        if (scaleFrom != 1) {
+          moved = Transform.scale(
+            scale: scaleFrom + (1 - scaleFrom) * t,
+            child: moved,
+          );
+        }
+        return Opacity(opacity: t.clamp(0.0, 1.0), child: moved);
+      },
+    );
+  }
+}
+
+// ── Backdrop ────────────────────────────────────────────────────────────────
+
+class _Glow extends StatelessWidget {
+  final Color color;
+  final double size;
+  const _Glow({required this.color, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          colors: [color, color.withValues(alpha: 0)],
+        ),
+      ),
+    );
+  }
+}
+
+class _Backdrop extends StatelessWidget {
+  const _Backdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    return const DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_Pro.dusk, _Pro.ink],
+          stops: [0, 0.6],
+        ),
+      ),
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
+        children: [
+          // The app's indigo, kept as a trace at the top edge.
+          Positioned(
+            top: -170,
+            left: -140,
+            child: _Glow(color: Color(0x4D6C63FF), size: 400),
+          ),
+          Positioned(
+            top: 30,
+            right: -190,
+            child: _Glow(color: Color(0x2EDDA24F), size: 420),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Top bar ─────────────────────────────────────────────────────────────────
+
+class _TopBar extends StatelessWidget {
+  const _TopBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Semantics(
+          button: true,
+          label: 'Close',
+          child: GestureDetector(
+            key: const Key('plans-close'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.maybePop(context),
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: Center(
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.06),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.10),
                     ),
                   ),
-                ),
-
-                // ── PRO crown badge (top-right of owl) ─────────────────────
-                Positioned(
-                  top: 2,
-                  right: 18,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFFFFD700), Color(0xFFFF8C00)],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFFFD700).withOpacity(0.55),
-                          blurRadius: 12,
-                          spreadRadius: 1,
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('👑', style: TextStyle(fontSize: 10)),
-                        SizedBox(width: 3),
-                        Text(
-                          'PRO',
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                      ],
-                    ),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: _Pro.cream.withValues(alpha: 0.8),
                   ),
                 ),
-
-                // ── Sparkles scattered around ───────────────────────────────
-                const Positioned(
-                  top: 4,
-                  left: 22,
-                  child: Text('✨', style: TextStyle(fontSize: 16)),
-                ),
-                const Positioned(
-                  top: 0,
-                  right: 6,
-                  child: Text('⭐', style: TextStyle(fontSize: 12)),
-                ),
-                const Positioned(
-                  bottom: 20,
-                  left: 8,
-                  child: Text('💫', style: TextStyle(fontSize: 14)),
-                ),
-                const Positioned(
-                  bottom: 16,
-                  right: 10,
-                  child: Text('✨', style: TextStyle(fontSize: 11)),
-                ),
-              ],
+              ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
 
-        const SizedBox(height: 12),
+// ── Hero ────────────────────────────────────────────────────────────────────
 
-        // Headline
-        const Text(
-          'Unlock Your Full Potential',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontFamily: 'Poppins',
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            height: 1.2,
+class _Hero extends StatelessWidget {
+  final Animation<double> ambient;
+  const _Hero({required this.ambient});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 196,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          AnimatedBuilder(
+            animation: ambient,
+            builder: (_, child) => Transform.scale(
+              scale: 0.94 + 0.08 * Curves.easeInOut.transform(ambient.value),
+              child: child,
+            ),
+            child: const _Glow(color: Color(0x4DF2D59B), size: 250),
+          ),
+          AnimatedBuilder(
+            animation: ambient,
+            builder: (_, child) => Transform.translate(
+              offset: Offset(0, 4 - 8 * Curves.easeInOut.transform(ambient.value)),
+              child: child,
+            ),
+            child: RepaintBoundary(
+              child: SvgPicture.asset(
+                'assets/images/plans_ustu.svg',
+                height: 186,
+                width: 186,
+                excludeFromSemantics: true,
+                placeholderBuilder: (_) =>
+                    const SizedBox(width: 186, height: 186),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Headline ────────────────────────────────────────────────────────────────
+
+class _Headline extends StatelessWidget {
+  const _Headline();
+
+  static const _title = TextStyle(
+    fontFamily: 'Poppins',
+    fontSize: 34,
+    fontWeight: FontWeight.w700,
+    height: 1.12,
+    letterSpacing: -0.8,
+    color: _Pro.cream,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final rule = Container(
+      width: 22,
+      height: 1,
+      color: _Pro.champagne.withValues(alpha: 0.5),
+    );
+
+    return Column(
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            rule,
+            const SizedBox(width: 10),
+            const Text(
+              'USTAAD PRO',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 3,
+                color: _Pro.champagne,
+              ),
+            ),
+            const SizedBox(width: 10),
+            rule,
+          ],
+        ),
+        const SizedBox(height: 14),
+        const Text('Limit khatam.', textAlign: TextAlign.center, style: _title),
+        ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: [_Pro.paleGold, _Pro.amber],
+          ).createShader(bounds),
+          child: const Text(
+            'Tayyari shuru.',
+            textAlign: TextAlign.center,
+            style: _title,
           ),
         ),
-
-        const SizedBox(height: 6),
-
-        // Exam-specific subtitle — not generic, talks to the student's real fear
+        const SizedBox(height: 12),
         Text(
-          'Crack FAST-NU & NUST with AI by your side',
+          '5,200+ real past paper questions.\nPractise them without a daily cap.',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontFamily: 'Poppins',
-            fontSize: 13,
-            color: Colors.white.withOpacity(0.60),
+            fontSize: 14,
+            height: 1.55,
+            color: _Pro.mist.withValues(alpha: 0.9),
           ),
         ),
       ],
     );
   }
+}
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  SOCIAL PROOF — "X students are already Pro"
-  //  Inspired by Duolingo's community feel
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildSocialProof() {
+// ── Benefits ────────────────────────────────────────────────────────────────
+
+class _BenefitList extends StatelessWidget {
+  final List<Animation<double>> rows;
+  const _BenefitList({required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFD700).withOpacity(0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.28)),
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _Pro.champagne.withValues(alpha: 0.14)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Column(
         children: [
-          // Avatar stack (3 overlapping circles)
-          SizedBox(
-            width: 68,
-            height: 28,
-            child: Stack(
+          for (var i = 0; i < _benefits.length; i++) ...[
+            if (i > 0)
+              Container(
+                height: 1,
+                margin: const EdgeInsets.only(left: 70, right: 16),
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
+            _Reveal(
+              animation: rows[i],
+              lift: 10,
+              child: _BenefitRow(benefit: _benefits[i]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BenefitRow extends StatelessWidget {
+  final _Benefit benefit;
+  const _BenefitRow({required this.benefit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 16, 12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  _Pro.champagne.withValues(alpha: 0.18),
+                  _Pro.amber.withValues(alpha: 0.05),
+                ],
+              ),
+              border: Border.all(
+                color: _Pro.champagne.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Icon(benefit.icon, size: 20, color: _Pro.champagne),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _avatarBubble('🧑', 0),
-                _avatarBubble('👩', 22),
-                _avatarBubble('👦', 44),
+                Text(
+                  benefit.title,
+                  style: const TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _Pro.cream,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  benefit.detail,
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 11.5,
+                    color: _Pro.mist.withValues(alpha: 0.85),
+                    height: 1.35,
+                  ),
+                ),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          RichText(
-            text: TextSpan(
-              children: [
-                const TextSpan(
-                  text: '2,847 ',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFFFFD700),
-                    fontSize: 13,
-                  ),
-                ),
-                TextSpan(
-                  text: 'students already Pro',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white.withOpacity(0.80),
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _avatarBubble(String emoji, double left) {
-    return Positioned(
-      left: left,
-      top: 0,
-      child: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: const Color(0xFF1A1464),
-          border: Border.all(color: const Color(0xFF6C63FF), width: 1.5),
-        ),
-        child: Center(child: Text(emoji, style: const TextStyle(fontSize: 13))),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  BENEFIT CHIPS — 3 scannable value propositions before the table
-  //  Law of Prägnanz: simple shapes > dense table for first impression
-  //  Inspired by Mondly's icon-led feature highlights
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildBenefitChips() {
-    const chips = [
-      _BenefitChip('🤖', 'Unlimited\nAI Explain', Color(0xFF8B7FFF)),
-      _BenefitChip('📄', 'All Past\nPapers', Color(0xFF4CAF50)),
-      _BenefitChip('📊', 'Weak Topic\nAnalytics', Color(0xFFFF6B6B)),
-    ];
-
-    return Row(
-      children: chips
-          .map(
-            (chip) => Expanded(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 5),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: chip.color.withOpacity(0.09),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: chip.color.withOpacity(0.28)),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(chip.icon, style: const TextStyle(fontSize: 24)),
-                    const SizedBox(height: 7),
-                    Text(
-                      chip.label,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontFamily: 'Poppins',
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                'FREE',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.4,
+                  color: _Pro.mist.withValues(alpha: 0.5),
                 ),
               ),
-            ),
-          )
-          .toList(),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  COMPARISON TABLE — PRO column gets a real gold badge header
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildComparisonTable() {
-    const features = [
-      _Feature('AI Explanations', '5 / day', 'Unlimited'),
-      _Feature('Quiz Sessions', '10 / day', 'Unlimited'),
-      _Feature('Full Papers', '2 / month', 'Unlimited'),
-      _Feature('Custom Tests', '✗', '✓'),
-      _Feature('Weak Topic Analytics', 'Basic', 'Detailed'),
-      _Feature('Priority AI Speed', '✗', '✓'),
-    ];
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
-      ),
-      child: Column(
-        children: [
-          // ── Header row ──────────────────────────────────────────────────
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(18),
-              ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-            child: Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    'Feature',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white.withOpacity(0.45),
-                      letterSpacing: 0.8,
-                    ),
-                  ),
+              Text(
+                benefit.free,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 11.5,
+                  color: _Pro.mist.withValues(alpha: 0.7),
+                  decoration: TextDecoration.lineThrough,
+                  decorationColor: _Pro.coral.withValues(alpha: 0.85),
                 ),
-                Expanded(
-                  flex: 2,
-                  child: Center(
-                    child: Text(
-                      'FREE',
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white.withOpacity(0.38),
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ),
-                ),
-                // PRO header — now a real gold pill, not just text
-                Expanded(
-                  flex: 2,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFFD700), Color(0xFFFF9500)],
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(0xFFFFD700).withOpacity(0.30),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: const Text(
-                        'PRO',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ── Feature rows ────────────────────────────────────────────────
-          ...features.asMap().entries.map((entry) {
-            final i = entry.key;
-            final f = entry.value;
-            final isLast = i == features.length - 1;
-            final freeIsX = f.freeValue == '✗';
-            final proIsCheck = f.proValue == '✓';
-
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 13,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: Text(
-                          f.name,
-                          style: const TextStyle(
-                            fontFamily: 'Poppins',
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Center(
-                          child: Text(
-                            f.freeValue,
-                            style: TextStyle(
-                              fontFamily: 'Poppins',
-                              fontSize: 12,
-                              fontWeight: freeIsX
-                                  ? FontWeight.w700
-                                  : FontWeight.w400,
-                              color: freeIsX
-                                  ? const Color(0xFFFF6B6B)
-                                  : Colors.white.withOpacity(0.48),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Center(
-                          child: Text(
-                            f.proValue,
-                            style: TextStyle(
-                              fontFamily: 'Poppins',
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: proIsCheck
-                                  ? const Color(0xFF4CAF50)
-                                  : const Color(0xFFFFD700),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (!isLast)
-                  Divider(
-                    height: 1,
-                    color: Colors.white.withOpacity(0.06),
-                    indent: 18,
-                    endIndent: 18,
-                  ),
-              ],
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  TOGGLE — Pro Monthly / Credit Pack
-  //  Active tab now uses a gradient fill instead of flat purple
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildToggle() {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
-      ),
-      child: Row(
-        children: [
-          _toggleTab('monthly', '✨  Pro Monthly'),
-          _toggleTab('credits', '⚡  Credit Pack'),
-        ],
-      ),
-    );
-  }
-
-  Widget _toggleTab(String value, String label) {
-    final active = _selected == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _selected = value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          decoration: BoxDecoration(
-            gradient: active
-                ? const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF8B7FFF), Color(0xFF6C63FF)],
-                  )
-                : null,
-            borderRadius: BorderRadius.circular(10),
-            boxShadow: active
-                ? [
-                    BoxShadow(
-                      color: const Color(0xFF6C63FF).withOpacity(0.40),
-                      blurRadius: 10,
-                    ),
-                  ]
-                : null,
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 12.5,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-              color: active ? Colors.white : Colors.white.withOpacity(0.40),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  PRICING CARD — AnimatedSwitcher for smooth tab transition
-  //  CTA button is now a pulsing gold gradient (no longer plain white)
-  //  Inspired by Mondly's "Try it for free" golden button
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildPricingCard() {
-    final isMonthly = _selected == 'monthly';
-
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.06),
-            end: Offset.zero,
-          ).animate(animation),
-          child: child,
-        ),
-      ),
-      child: Container(
-        key: ValueKey(_selected),
-        width: double.infinity,
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isMonthly
-                ? [const Color(0xFF3D35B8), const Color(0xFF6C63FF)]
-                : [const Color(0xFF1E2A4A), const Color(0xFF2D3A6B)],
-          ),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: isMonthly
-                ? const Color(0xFF9C8DFF).withOpacity(0.55)
-                : const Color(0xFFFFD700).withOpacity(0.38),
-            width: 1.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isMonthly
-                  ? const Color(0xFF6C63FF).withOpacity(0.45)
-                  : const Color(0xFFFFD700).withOpacity(0.15),
-              blurRadius: 28,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Title row ─────────────────────────────────────────────────
-            Row(
-              children: [
-                Text(
-                  isMonthly ? '✨  Pro Plan' : '⚡  Credit Pack',
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-                const Spacer(),
-                if (isMonthly)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFD700).withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: const Color(0xFFFFD700).withOpacity(0.55),
-                      ),
-                    ),
-                    child: const Text(
-                      'Most Popular',
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFFFFD700),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // ── Price display ─────────────────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Colors.white, Color(0xFFDDD8FF)],
-                  ).createShader(bounds),
-                  child: Text(
-                    isMonthly ? 'PKR 399' : 'PKR 249',
-                    style: const TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 36,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 7),
-                  child: Text(
-                    isMonthly ? '/ month' : '50 credits',
-                    style: TextStyle(
-                      fontFamily: 'Poppins',
-                      fontSize: 13,
-                      color: Colors.white.withOpacity(0.55),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 6),
-
-            Text(
-              isMonthly
-                  ? 'Everything unlimited. Cancel anytime.'
-                  : 'Use credits for AI, quizzes & papers. No expiry.',
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 12,
-                color: Colors.white.withOpacity(0.58),
-              ),
-            ),
-
-            const SizedBox(height: 22),
-
-            // ── CTA — Golden gradient with gentle pulse ────────────────────
-            // Uses AnimatedBuilder only on the scale transform so only
-            // the button geometry redraws, not the whole card.
-            AnimatedBuilder(
-              animation: _ctaScaleAnim,
-              builder: (_, child) =>
-                  Transform.scale(scale: _ctaScaleAnim.value, child: child),
-              child: _GoldenButton(
-                label: isMonthly ? 'Get Pro — PKR 399/mo' : 'Buy 50 Credits',
-                onTap: () {
-                  // TODO: wire to RevenueCat purchase flow
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text(
-                        'Payment coming soon! 🚀',
-                        style: TextStyle(fontFamily: 'Poppins'),
-                      ),
-                      backgroundColor: const Color(0xFF6C63FF),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  MAYBE LATER
-  // ═══════════════════════════════════════════════════════════════════════════
-  Widget _buildMaybeLater(BuildContext context) {
-    return TextButton(
-      onPressed: () => Navigator.pop(context),
-      child: Text(
-        'Maybe later',
-        style: TextStyle(
-          fontFamily: 'Poppins',
-          fontSize: 13,
-          color: Colors.white.withOpacity(0.35),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  GOLDEN CTA BUTTON — extracted widget for cleaner AnimatedBuilder usage.
-//  Material + InkWell gives a proper ripple on top of the gradient.
-// ─────────────────────────────────────────────────────────────────────────────
-class _GoldenButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _GoldenButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        splashColor: Colors.white.withOpacity(0.20),
-        highlightColor: Colors.white.withOpacity(0.10),
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [Color(0xFFFFD700), Color(0xFFFF8C00)],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFFFFD700).withOpacity(0.45),
-                blurRadius: 18,
-                offset: const Offset(0, 5),
               ),
             ],
           ),
-          child: SizedBox(
-            height: 52,
-            width: double.infinity,
-            child: Center(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF1A1A2E), // dark text on gold — high contrast
-                  letterSpacing: 0.3,
-                ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Plans ───────────────────────────────────────────────────────────────────
+
+class _PlanPicker extends StatelessWidget {
+  final _Plan selected;
+  final ValueChanged<_Plan> onSelect;
+  const _PlanPicker({required this.selected, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final plan in _Plan.values) ...[
+            if (plan != _Plan.values.first) const SizedBox(width: 12),
+            Expanded(
+              child: _PlanCard(
+                plan: plan,
+                selected: plan == selected,
+                onTap: () => onSelect(plan),
               ),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanCard extends StatelessWidget {
+  final _Plan plan;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PlanCard({
+    required this.plan,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final info = _plans[plan]!;
+    final fg = selected ? _Pro.ink : _Pro.cream;
+    final soft = selected
+        ? _Pro.ink.withValues(alpha: 0.62)
+        : _Pro.mist.withValues(alpha: 0.85);
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '${info.title}, ${info.price}, ${info.detail}',
+      excludeSemantics: true,
+      child: GestureDetector(
+        key: Key('plan-${plan.name}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.fromLTRB(14, 14, 12, 16),
+          decoration: BoxDecoration(
+            gradient: selected
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [_Pro.cream, _Pro.champagne],
+                  )
+                : null,
+            color: selected ? null : Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected
+                  ? _Pro.amber
+                  : _Pro.champagne.withValues(alpha: 0.16),
+              width: selected ? 1.5 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: _Pro.amber.withValues(alpha: selected ? 0.28 : 0),
+                blurRadius: 26,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 240),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? _Pro.ink
+                              : _Pro.coral.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          info.tag,
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.1,
+                            color: selected ? _Pro.champagne : _Pro.coral,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  _Check(selected: selected),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                info.title,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: fg,
+                ),
+              ),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  info.price,
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.4,
+                    height: 1.2,
+                    color: fg,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                info.detail,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 11.5,
+                  height: 1.35,
+                  color: soft,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -939,19 +817,239 @@ class _GoldenButton extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  DATA MODELS
-// ─────────────────────────────────────────────────────────────────────────────
-class _Feature {
-  final String name;
-  final String freeValue;
-  final String proValue;
-  const _Feature(this.name, this.freeValue, this.proValue);
+class _Check extends StatelessWidget {
+  final bool selected;
+  const _Check({required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 240),
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? _Pro.ink : Colors.transparent,
+        border: Border.all(
+          color: selected ? _Pro.ink : _Pro.mist.withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+      ),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: selected ? 1 : 0,
+        child: const Icon(Icons.check_rounded, size: 14, color: _Pro.champagne),
+      ),
+    );
+  }
 }
 
-class _BenefitChip {
-  final String icon;
+// ── Bottom panel ────────────────────────────────────────────────────────────
+
+class _BottomPanel extends StatelessWidget {
+  final _PlanInfo plan;
+  final VoidCallback onContinue;
+  const _BottomPanel({required this.plan, required this.onContinue});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: _Pro.ink.withValues(alpha: 0.88),
+        border: Border(
+          top: BorderSide(color: _Pro.champagne.withValues(alpha: 0.08)),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 14, 22, 2),
+        child: _Column(
+          children: [
+            _ProButton(
+              key: const Key('plans-cta'),
+              label: '${plan.cta}  ·  ${plan.price}',
+              onTap: onContinue,
+            ),
+            const SizedBox(height: 10),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Text(
+                plan.finePrint,
+                key: ValueKey(plan.finePrint),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 12,
+                  color: _Pro.mist.withValues(alpha: 0.8),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.maybePop(context),
+              style: TextButton.styleFrom(
+                foregroundColor: _Pro.mist,
+                minimumSize: const Size(120, 40),
+              ),
+              child: Text(
+                'Maybe later',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 13,
+                  color: _Pro.mist.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The gold button. A light catches across it every few seconds, and it gives
+/// under the finger when pressed.
+class _ProButton extends StatefulWidget {
   final String label;
-  final Color color;
-  const _BenefitChip(this.icon, this.label, this.color);
+  final VoidCallback onTap;
+  const _ProButton({super.key, required this.label, required this.onTap});
+
+  @override
+  State<_ProButton> createState() => _ProButtonState();
+}
+
+class _ProButtonState extends State<_ProButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shine = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 3400),
+  );
+  bool _pressed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _shine.stop();
+    } else if (!_shine.isAnimating) {
+      _shine.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _shine.dispose();
+    super.dispose();
+  }
+
+  void _setPressed(bool value) {
+    if (_pressed != value) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = BorderRadius.all(Radius.circular(18));
+
+    return Semantics(
+      button: true,
+      label: widget.label,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTapDown: (_) => _setPressed(true),
+        onTapUp: (_) => _setPressed(false),
+        onTapCancel: () => _setPressed(false),
+        onTap: () {
+          HapticFeedback.mediumImpact();
+          widget.onTap();
+        },
+        child: AnimatedScale(
+          scale: _pressed ? 0.97 : 1,
+          duration: const Duration(milliseconds: 120),
+          child: Container(
+            height: 58,
+            decoration: BoxDecoration(
+              borderRadius: radius,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [_Pro.paleGold, _Pro.champagne, _Pro.amber],
+                stops: [0, 0.45, 1],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: _Pro.amber.withValues(alpha: 0.35),
+                  blurRadius: 24,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: radius,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: RepaintBoundary(
+                      child: AnimatedBuilder(
+                        animation: _shine,
+                        builder: (_, child) {
+                          // Sweeps across in the first third, then rests.
+                          final t = Curves.easeInOut.transform(
+                            (_shine.value / 0.32).clamp(0.0, 1.0),
+                          );
+                          return FractionalTranslation(
+                            translation: Offset(-1.2 + 2.4 * t, 0),
+                            child: child,
+                          );
+                        },
+                        child: const DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment(-1, -0.4),
+                              end: Alignment(1, 0.4),
+                              colors: [
+                                Color(0x00FFFFFF),
+                                Color(0x73FFFFFF),
+                                Color(0x00FFFFFF),
+                              ],
+                              stops: [0.3, 0.5, 0.7],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              widget.label,
+                              style: const TextStyle(
+                                fontFamily: 'Poppins',
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: _Pro.ink,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 20,
+                              color: _Pro.ink,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

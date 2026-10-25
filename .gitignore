@@ -51,3 +51,5 @@ ios/Runner/GoogleService-Info.plist
 lib/core/constants/env.dart
 *.env
 .env*
+# Firebase CLI deploy cache, rewritten on every deploy
+.firebase/

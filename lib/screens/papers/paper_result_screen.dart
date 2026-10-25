@@ -4,7 +4,6 @@
 import 'package:flutter/material.dart';
 import '../../models/paper_model.dart';
 import '../../providers/progress_provider.dart';
-import '../home/home_screen.dart';
 
 class PaperResultScreen extends StatefulWidget {
   final PaperResult result;
@@ -29,6 +28,10 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
         return const Color(0xFF4CAF50);
       case ExamType.nts:
         return const Color(0xFFFF6B6B);
+      case ExamType.mdcat:
+        return const Color(0xFF00BFA5);
+      case ExamType.numsMdcat:
+        return const Color(0xFF2196F3);
     }
   }
 
@@ -40,6 +43,10 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
         return const Color(0xFF81C784);
       case ExamType.nts:
         return const Color(0xFFFF9999);
+      case ExamType.mdcat:
+        return const Color(0xFF64FFDA);
+      case ExamType.numsMdcat:
+        return const Color(0xFF90CAF9);
     }
   }
 
@@ -444,11 +451,7 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
         Expanded(
           flex: 2,
           child: GestureDetector(
-            onTap: () => Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
-              (route) => false,
-            ),
+            onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 13),
               decoration: BoxDecoration(

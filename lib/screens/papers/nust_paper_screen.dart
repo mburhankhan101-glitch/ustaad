@@ -22,7 +22,7 @@ class _NustPaperScreenState extends ConsumerState<NustPaperScreen> {
           .read(paperSessionProvider.notifier)
           .startPaper(
             widget.examType,
-            uid: FirebaseAuth.instance.currentUser!.uid,
+            uid: FirebaseAuth.instance.currentUser?.uid ?? '',
           );
     });
   }

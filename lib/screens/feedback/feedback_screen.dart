@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class FeedbackScreen extends StatefulWidget {
   const FeedbackScreen({super.key});
@@ -73,13 +74,20 @@ class _FeedbackScreenState extends State<FeedbackScreen>
 
     try {
       final user = FirebaseAuth.instance.currentUser;
+
+      // Read from the package rather than a literal. This was hardcoded to
+      // '1.2.0' and had already gone stale, which quietly destroys the one
+      // thing the field is for: telling whether a reported bug is old or
+      // something the last release introduced.
+      final info = await PackageInfo.fromPlatform();
+
       await FirebaseFirestore.instance.collection('feedback').add({
         'userId': user?.uid ?? 'anonymous',
         'displayName': user?.displayName ?? 'Anonymous',
         'email': user?.email ?? '',
         'message': _messageController.text.trim(),
         'timestamp': FieldValue.serverTimestamp(),
-        'appVersion': '1.0.0',
+        'appVersion': '${info.version}+${info.buildNumber}',
       });
 
       if (mounted) {

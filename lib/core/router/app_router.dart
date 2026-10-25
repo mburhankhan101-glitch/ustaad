@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/models/paper_model.dart';
 import 'package:ustaad/screens/auth/test_selection.dart';
 import 'package:ustaad/screens/papers/program/program_selection_screen.dart';
@@ -23,6 +24,10 @@ class PapersRouteArgs {
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/',
+    // Logs a screen_view on every route change, which is what turns the
+    // funnel into something you can actually read in Firebase: how many
+    // installs reach /home, and how many die at /verify_email.
+    observers: [Analytics.instance.observer],
     routes: [
       GoRoute(path: '/', builder: (context, state) => const SplashScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),

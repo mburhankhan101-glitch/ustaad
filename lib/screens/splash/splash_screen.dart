@@ -99,12 +99,31 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   Future<Widget> _resolveDestination() async {
     // ── Step 1: Check Firebase auth ─────────────────────────────────────────
+    //
+    // currentUser is not reliable on a cold start. Firebase restores the
+    // signed-in user from disk asynchronously after initializeApp returns,
+    // so reading currentUser straight away can hand back null for a user who
+    // is perfectly signed in — and this screen turned that null into the
+    // login screen. That is the "I have to log in again every time I open
+    // the app" report.
+    //
+    // authStateChanges emits once restoration has actually finished, so the
+    // first event is the real answer. The timeout is a backstop: if the
+    // stream never produces anything we fall back to currentUser rather than
+    // hanging on the splash forever.
     User? user;
     try {
-      user = FirebaseAuth.instance.currentUser;
+      user = await FirebaseAuth.instance.authStateChanges().first.timeout(
+        const Duration(seconds: 5),
+      );
     } catch (_) {
-      // Firebase not initialized or offline — fall through to login
-      user = null;
+      // Timed out, or Firebase is not initialised. currentUser may still be
+      // populated by now, so it is a better guess than nothing.
+      try {
+        user = FirebaseAuth.instance.currentUser;
+      } catch (_) {
+        user = null;
+      }
     }
 
     if (user != null) {
@@ -321,9 +340,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                 // ✅ Only show progress bar on mobile — on web it's never visible
                 if (!kIsWeb)
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 60,
-                      vertical: 48,
+                    // Bottom inset included for the same reason as the
+                    // streak map: Android draws this behind the navigation
+                    // bar now, which was eating the whole 48px gap.
+                    padding: EdgeInsets.fromLTRB(
+                      60,
+                      48,
+                      60,
+                      48 + MediaQuery.of(context).viewPadding.bottom,
                     ),
                     child: Column(
                       children: [

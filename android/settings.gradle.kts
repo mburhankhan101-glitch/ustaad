@@ -21,7 +21,11 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
     // START: FlutterFire Configuration
-    id("com.google.gms.google-services") version("4.3.15") apply false
+    // google-services must be 4.4.1 or newer: the Crashlytics Gradle plugin v3
+    // reads the Firebase app id through it and fails at configuration time on
+    // anything older.
+    id("com.google.gms.google-services") version("4.4.2") apply false
+    id("com.google.firebase.crashlytics") version("3.0.2") apply false
     // END: FlutterFire Configuration
     id("org.jetbrains.kotlin.android") version "2.2.20" apply false
 }
