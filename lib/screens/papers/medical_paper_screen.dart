@@ -69,7 +69,7 @@ class _MedicalPaperScreenState extends ConsumerState<_MedicalPaperScreen> {
           .read(paperSessionProvider.notifier)
           .startPaper(
             widget.examType,
-            uid: FirebaseAuth.instance.currentUser!.uid,
+            uid: FirebaseAuth.instance.currentUser?.uid ?? '',
           );
     });
   }

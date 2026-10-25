@@ -1681,10 +1681,10 @@ class _PerfectScoreContentState extends State<_PerfectScoreContent>
 
   void _startSubTypewriter() async {
     await Future.delayed(const Duration(milliseconds: 100));
-    for (int i = 1; i <= _fullSub.length; i++) {
+    for (int i = 1; i <= _fullSub.characters.length; i++) {
       await Future.delayed(const Duration(milliseconds: 22));
       if (!mounted) return;
-      setState(() => _visibleSub = _fullSub.substring(0, i));
+      setState(() => _visibleSub = typewriterPrefix(_fullSub, i));
     }
     if (!mounted) return;
     setState(() => _subDone = true);
@@ -1974,10 +1974,10 @@ class _BadScoreContentState extends State<_BadScoreContent>
 
   void _startTypewriter() async {
     await Future.delayed(const Duration(milliseconds: 150));
-    for (int i = 1; i <= _fullText.length; i++) {
+    for (int i = 1; i <= _fullText.characters.length; i++) {
       await Future.delayed(const Duration(milliseconds: 28));
       if (!mounted) return;
-      setState(() => _visibleText = _fullText.substring(0, i));
+      setState(() => _visibleText = typewriterPrefix(_fullText, i));
     }
     if (!mounted) return;
     setState(() => _typewriterDone = true);
@@ -2474,6 +2474,24 @@ class WeakTopicOverlayContentState extends State<WeakTopicOverlayContent>
       ),
     );
   }
+}
+
+/// The first [glyphs] grapheme clusters of [full].
+///
+/// Typewriter effects must never cut a string by code unit. Every emoji in
+/// Ustu's lines is a surrogate pair — two UTF-16 code units — and a cut
+/// between the halves leaves a lone surrogate. Flutter's text layout throws
+/// "string is not well-formed UTF-16" on that, from inside paint, which
+/// takes the app down. Grapheme clusters cannot be split, so this is safe
+/// at every value of [glyphs].
+///
+/// Also keeps accented characters and ZWJ emoji sequences (👨‍👩‍👧) whole,
+/// which code-unit slicing would tear apart even without crashing.
+String typewriterPrefix(String full, int glyphs) {
+  if (glyphs <= 0) return '';
+  final cs = full.characters;
+  if (glyphs >= cs.length) return full;
+  return cs.take(glyphs).toString();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

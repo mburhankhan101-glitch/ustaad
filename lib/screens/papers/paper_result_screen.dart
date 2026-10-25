@@ -4,7 +4,6 @@
 import 'package:flutter/material.dart';
 import '../../models/paper_model.dart';
 import '../../providers/progress_provider.dart';
-import '../home/home_screen.dart';
 
 class PaperResultScreen extends StatefulWidget {
   final PaperResult result;
@@ -452,11 +451,7 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
         Expanded(
           flex: 2,
           child: GestureDetector(
-            onTap: () => Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (_) => const HomeScreen()),
-              (route) => false,
-            ),
+            onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 13),
               decoration: BoxDecoration(

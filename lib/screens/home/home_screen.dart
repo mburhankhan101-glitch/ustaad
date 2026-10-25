@@ -2434,7 +2434,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
     );
     _typingAnim = IntTween(
       begin: 0,
-      end: _currentLine.length,
+      end: _currentLine.characters.length,
     ).animate(CurvedAnimation(parent: _typingCtrl, curve: Curves.easeOut));
     _typingAnim.addListener(_updateDisplayedText);
     _typingCtrl.forward();
@@ -2450,7 +2450,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
 
   void _updateDisplayedText() {
     setState(
-      () => _displayedText = _currentLine.substring(0, _typingAnim.value),
+      () => _displayedText = typewriterPrefix(_currentLine, _typingAnim.value),
     );
   }
 
@@ -2460,7 +2460,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
     setState(() => _currentLine = (_lines.toList()..shuffle()).first);
     _typingAnim = IntTween(
       begin: 0,
-      end: _currentLine.length,
+      end: _currentLine.characters.length,
     ).animate(CurvedAnimation(parent: _typingCtrl, curve: Curves.easeOut));
     _typingAnim.removeListener(_updateDisplayedText);
     _typingAnim.addListener(_updateDisplayedText);

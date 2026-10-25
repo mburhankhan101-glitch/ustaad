@@ -125,10 +125,13 @@ class PaperSessionNotifier
           // Validate that we got enough questions
           final totalFetched = allQuestions.length;
           if (totalFetched < cfg.totalQuestions) {
+            print(
+              'USTAAD: "${cfg.label}" short - expected ${cfg.totalQuestions}, '
+              'got $totalFetched. Check the sub-section mapping.',
+            );
             throw Exception(
-              'Not enough questions for "${cfg.label}". '
-              'Check your Firestore data and sub‑sections mapping.\n'
-              'Expected: ${cfg.totalQuestions}, got: $totalFetched',
+              'We could not put together the ${cfg.label} section of this '
+              'paper. Please try again in a moment.',
             );
           }
 
@@ -159,12 +162,16 @@ class PaperSessionNotifier
       }
 
       if (loadedSections.isEmpty) {
+        // The detail stays in the log. _ErrorView renders the error straight
+        // onto the screen, and students were being shown Firestore index
+        // advice mid-exam.
+        print(
+          'USTAAD: no sections loaded for $examType. Check the exam and '
+          'section values, the composite index, and the security rules.',
+        );
         state = AsyncValue.error(
-          'No questions found in Firestore.\n\n'
-          'Check:\n'
-          '1. "exam" and "section" field values match exactly.\n'
-          '2. Composite index on exam + section exists in Firebase Console.\n'
-          '3. Firestore security rules allow reads.',
+          'We could not load this paper. Check your internet connection '
+          'and try again.',
           StackTrace.current,
         );
         return;
@@ -202,7 +209,7 @@ class PaperSessionNotifier
   void _startTimer(ExamType type) {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      final current = state.value;
+      final current = state.valueOrNull;
       if (current == null || current.isSubmitted) {
         _timer?.cancel();
         return;
@@ -247,7 +254,7 @@ class PaperSessionNotifier
   // ── Answer selection ──────────────────────────────────────────────────────
 
   void selectOption(int optionIndex) {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
     final qId = current.currentQuestion.id;
     if (current.answers[qId]?.isConfirmed == true) return;
@@ -257,7 +264,7 @@ class PaperSessionNotifier
   }
 
   void selectOptionById(String questionId, int optionIndex) {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
     final updated = Map<String, QuestionAnswer>.from(current.answers);
     updated[questionId] = QuestionAnswer(
@@ -268,7 +275,7 @@ class PaperSessionNotifier
   }
 
   void confirmAnswer() {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
     final qId = current.currentQuestion.id;
     final existing = current.answers[qId];
@@ -281,7 +288,7 @@ class PaperSessionNotifier
   // ── Navigation ────────────────────────────────────────────────────────────
 
   void nextQuestion() {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null) return;
     final max = current.currentSection.questions.length - 1;
     if (current.currentQuestionIndex < max) {
@@ -294,7 +301,7 @@ class PaperSessionNotifier
   }
 
   void previousQuestion() {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null) return;
     if (current.currentQuestionIndex > 0) {
       state = AsyncValue.data(
@@ -306,7 +313,7 @@ class PaperSessionNotifier
   }
 
   void switchToSection(int sectionIndex) {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
     final freeNavExams = {ExamType.nustNET, ExamType.mdcat, ExamType.numsMdcat};
     if (!freeNavExams.contains(current.examType)) return;
@@ -319,7 +326,7 @@ class PaperSessionNotifier
   }
 
   void advanceToNextSection() {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
     final next = current.currentSectionIndex + 1;
     if (next < current.sections.length) {
@@ -332,7 +339,7 @@ class PaperSessionNotifier
   }
 
   void jumpToPage(int pageIndex, int questionsPerPage) {
-    final current = state.value;
+    final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
     final qIndex = pageIndex * questionsPerPage;
     final max = current.currentSection.questions.length - 1;
@@ -345,7 +352,7 @@ class PaperSessionNotifier
 
   PaperResult submitPaper() {
     _timer?.cancel();
-    final current = state.value!;
+    final current = state.valueOrNull!;
 
     final secondsUsed =
         PaperConfigs.totalMinutes(current.examType) * 60 -

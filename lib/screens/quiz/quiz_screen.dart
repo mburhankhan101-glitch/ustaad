@@ -186,7 +186,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
       questions = await FirestoreService().fetchQuestions(
         exam: widget.exam,
         section: widget.section,
-        uid: FirebaseAuth.instance.currentUser!.uid,
+        uid: FirebaseAuth.instance.currentUser?.uid ?? '',
         limit: widget.limit,
         topic: widget.topic,
       );

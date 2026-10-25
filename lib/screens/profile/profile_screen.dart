@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/providers/credits_provider.dart';
-import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/feedback/feedback_screen.dart';
 import '../../providers/auth_provider.dart';
 import 'package:ustaad/providers/progress_provider.dart';
@@ -713,10 +713,7 @@ class ProfileScreen extends ConsumerWidget {
       ref.invalidate(userProgressProvider);
       await ref.read(authProvider.notifier).signOut();
       if (context.mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (route) => false,
-        );
+        context.go('/login');
       }
     }
   }
@@ -742,6 +739,9 @@ class ProfileScreen extends ConsumerWidget {
     // rendered with its null-user "Student" placeholder.
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
+    // Captured with the others: the auth state flips partway through, so
+    // the context is not safe to read by the time we need to navigate.
+    final router = GoRouter.of(context);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -849,10 +849,7 @@ class ProfileScreen extends ConsumerWidget {
       ref.invalidate(userProgressProvider);
       await ref.read(authProvider.notifier).signOut();
 
-      navigator.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
+      router.go('/login');
     } catch (e) {
       navigator.pop(); // close spinner
       messenger.showSnackBar(
