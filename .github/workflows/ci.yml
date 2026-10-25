@@ -67,5 +67,58 @@ jobs:
       # catches Gradle and manifest breakage that analyze cannot see — the
       # Crashlytics plugin needing google-services 4.4.1+ was exactly that
       # class of failure, and it only appeared at build time.
+      # android/app/google-services.json is gitignored, so the runner has no
+      # Firebase config and the Google Services plugin refuses to run. That is
+      # the whole reason this job has been red since September.
+      #
+      # The step below only needs to COMPILE the app, never to reach Firebase,
+      # and the plugin is satisfied by any structurally valid file whose
+      # package name matches. So write a placeholder when the real one is
+      # absent — the Gradle and manifest breakage this step exists to catch
+      # still gets caught, and no Firebase config has to live in the repo or
+      # in a secret.
+      #
+      # The guard matters: if a real google-services.json is ever present
+      # (a self-hosted runner, someone running this locally with act), it is
+      # left alone.
+      - name: Write a placeholder google-services.json
+        run: |
+          if [ -f android/app/google-services.json ]; then
+            echo "Real google-services.json present — leaving it alone."
+            exit 0
+          fi
+          cat > android/app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "ustaad-ci-placeholder",
+              "storage_bucket": "ustaad-ci-placeholder.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.ustaad.app"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [
+                  {
+                    "current_key": "placeholder-key-not-valid-for-any-request"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+          echo "Placeholder written for com.ustaad.app."
+
       - name: Build debug APK
         run: flutter build apk --debug
