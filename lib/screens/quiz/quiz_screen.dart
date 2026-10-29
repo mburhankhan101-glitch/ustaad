@@ -11,7 +11,7 @@ import 'package:ustaad/providers/credits_provider.dart';
 import 'package:ustaad/screens/explanation/explanation_screen.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
 import 'package:ustaad/services/firestore_service.dart';
-import 'package:ustaad/services/haptic_service.dart';
+import 'package:ustaad/services/sound_service.dart';
 import 'package:ustaad/widgets/common/no_questions_widget.dart';
 import 'package:ustaad/widgets/common/skeleton_widgets.dart';
 import 'result_screen.dart';
@@ -100,6 +100,8 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
     // The activation event. Install to here is what the signup wall and the
     // email-verification gate are eating, and it has been invisible until now.
     Analytics.instance.quizStarted(exam: widget.exam, section: widget.section);
+
+    SoundService.instance.warmUp();
 
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
@@ -332,7 +334,12 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
 
   void _confirmAnswer() {
     if (_selectedIndex == null || _answered) return;
-    HapticService.selection();
+
+    final correct = _selectedIndex == _current.correctIndex;
+    SoundService.instance.play(
+      correct ? AnswerFeedback.correct : AnswerFeedback.wrong,
+    );
+
     _userAnswers[_currentIndex] = _selectedIndex;
     setState(() => _answered = true);
     _toastCtrl.forward();

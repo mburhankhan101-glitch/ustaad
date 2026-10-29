@@ -45,6 +45,7 @@ dependencies:
   cupertino_icons: ^1.0.8
 
   archive: ^4.0.0
+  audioplayers: ^6.7.1
 
   
 
@@ -70,6 +71,7 @@ flutter:
     - assets/images/
     - assets/icons/ 
     - assets/reels/     # ← added this line
+    - assets/sounds/
 
   fonts:
     - family: Poppins
