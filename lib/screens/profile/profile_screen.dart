@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ustaad/core/notifications/reminder_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/providers/credits_provider.dart';
@@ -711,6 +712,10 @@ class ProfileScreen extends ConsumerWidget {
     );
     if (confirmed == true) {
       ref.invalidate(userProgressProvider);
+      // The reminder is armed on the device, not the account, so signing out
+      // does not clear it. Without this, someone who signs out keeps being
+      // told their streak is about to break.
+      await ReminderService.instance.cancelAll();
       await ref.read(authProvider.notifier).signOut();
       if (context.mounted) {
         context.go('/login');
@@ -847,6 +852,7 @@ class ProfileScreen extends ConsumerWidget {
       await Analytics.instance.accountDeleted();
 
       ref.invalidate(userProgressProvider);
+      await ReminderService.instance.cancelAll();
       await ref.read(authProvider.notifier).signOut();
 
       router.go('/login');

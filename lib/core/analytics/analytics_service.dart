@@ -170,4 +170,13 @@ class Analytics {
 
   Future<void> pushPermissionAnswered({required bool granted}) =>
       _log('push_permission', {'granted': granted ? 'yes' : 'no'});
+
+  /// A streak reminder was armed for tonight. Paired with [reminderOpened],
+  /// this is the open rate — the only way to tell a reminder that works from
+  /// one that is quietly training people to swipe Ustaad away.
+  Future<void> reminderScheduled({required String kind, required int streak}) =>
+      _log('reminder_scheduled', {'kind': kind, 'streak': streak});
+
+  Future<void> reminderOpened({required String kind}) =>
+      _log('reminder_opened', {'kind': kind});
 }

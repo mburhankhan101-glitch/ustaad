@@ -9,6 +9,7 @@ import 'package:flutter/services.dart'; // ← for orientation lock
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/core/notifications/push_service.dart';
+import 'package:ustaad/core/notifications/reminder_service.dart';
 import 'package:ustaad/core/router/app_router.dart';
 import 'package:ustaad/core/theme/app_theme.dart';
 import 'package:ustaad/firebase_options.dart';
@@ -86,6 +87,9 @@ void main() async {
   // ── Analytics and push ─────────────────────────────────────────────────────
   await Analytics.instance.init();
   await PushService.instance.init();
+  // Channel and timezone only. Nothing is scheduled until HomeScreen knows
+  // the streak, because a reminder without one has nothing to say.
+  await ReminderService.instance.init();
 
   runApp(const ProviderScope(child: MyApp()));
 }

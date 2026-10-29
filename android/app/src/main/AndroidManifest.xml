@@ -6,6 +6,18 @@
          value in the app, not on first launch. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- Scheduled reminders are armed on the device, not sent from a server
+         (ReminderService explains why). Android drops every pending alarm on
+         reboot, so without this the streak reminder silently stops working
+         for anyone who restarts their phone — and nothing anywhere reports
+         it. The plugin's boot receiver below re-arms them.
+
+         Note what is NOT here: SCHEDULE_EXACT_ALARM. Reminders are scheduled
+         inexactly, which Android 14+ allows without any permission at all.
+         A few minutes either side of 8pm costs nothing, and an exact-alarm
+         declaration is something Play asks you to justify. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
     <!-- Firebase Analytics pulls the advertising ID permissions in through
          play-services-measurement, even though this app shows no ads, has no
          ad partners and runs no install campaigns. Left in, they force a
@@ -54,6 +66,20 @@
              notifications plugin we do not ship yet. Left unset, FCM creates
              and uses its own fallback channel. Add both together, never the
              meta-data alone. -->
+
+        <!-- flutter_local_notifications: delivers scheduled notifications,
+             and re-arms them after a reboot or an app update. -->
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
     </application>
 
     <queries>

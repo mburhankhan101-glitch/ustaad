@@ -11,6 +11,7 @@ import 'package:ustaad/screens/quiz/quiz_screen.dart';
 import 'package:ustaad/screens/profile/profile_screen.dart';
 import 'package:ustaad/providers/progress_provider.dart';
 import 'package:ustaad/providers/auth_provider.dart';
+import 'package:ustaad/core/notifications/reminder_service.dart';
 import 'package:ustaad/core/utils/ustu_overlays.dart';
 import 'package:ustaad/core/utils/connectivity_service.dart';
 import 'package:ustaad/services/haptic_service.dart';
@@ -264,6 +265,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _brokenStreakShown = false;
   List<String> _cachedSelectedTests =
       []; // cached so _showQuizPicker can filter tabs
+
+  /// Streak and last-active date, joined, as they were when the reminder was
+  /// last armed. Home rebuilds constantly; re-scheduling on every rebuild
+  /// would be dozens of platform calls a minute for no change.
+  String? _reminderKey;
 
   // ── Streak-increase celebration (see pendingStreakCelebration) ──────────
   bool _celebrationScheduled = false;
@@ -548,6 +554,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           lastActiveDate: lastActiveDate,
         );
         final int streak = streakNow.streak;
+
+        // Re-arm tonight's streak reminder whenever either value moves.
+        // This is also what cancels it: finishing a quiz updates
+        // lastActiveDate to today, and ReminderService.refresh() then clears
+        // the pending notification instead of scheduling a new one.
+        final reminderKey = '$streak|$lastActiveDate';
+        if (_reminderKey != reminderKey) {
+          _reminderKey = reminderKey;
+          ReminderService.instance.refresh(
+            streak: streak,
+            lastActiveDate: lastActiveDate,
+          );
+        }
         final int solvedToday = progressData?['solvedToday'] as int? ?? 0;
         final double accuracy =
             (progressData?['accuracy'] as num?)?.toDouble() ?? 0.0;
