@@ -8,6 +8,7 @@ import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/core/utils/connectivity_service.dart';
 import 'package:ustaad/models/question_model.dart';
 import 'package:ustaad/providers/credits_provider.dart';
+import 'package:ustaad/providers/progress_provider.dart';
 import 'package:ustaad/screens/explanation/explanation_screen.dart';
 import 'package:ustaad/screens/plans/plans_screen.dart';
 import 'package:ustaad/services/firestore_service.dart';
@@ -218,6 +219,53 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
     });
 
     _entranceCtrl.forward();
+  }
+
+  /// Banks the questions answered so far, for someone who leaves part way
+  /// through.
+  ///
+  /// saveProgress used to be called from exactly one place — ResultScreen —
+  /// which is only reachable by finishing. Answer nine questions, quit, and
+  /// the app recorded nothing at all: no daily goal, no streak, no accuracy,
+  /// no totalSolved. Nine questions of real work, and the home screen said
+  /// 0/20. With the streak reminder now live that got worse still, since
+  /// they would be told their streak was about to break on an evening they
+  /// had practised.
+  ///
+  /// Double counting is already handled: on resume, questions answered
+  /// before are marked -2 and ResultScreen excludes them, so what is banked
+  /// here is never banked again at the end.
+  Future<void> _savePartialProgress() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || _quizCompleted) return;
+
+    var attempted = 0;
+    var correct = 0;
+    for (var i = 0; i < _questions.length; i++) {
+      final answer = _userAnswers[i];
+      // null is unreached, -2 is carried over from an earlier sitting.
+      if (answer == null || answer == -2) continue;
+      attempted++;
+      if (answer == _questions[i].correctIndex) correct++;
+    }
+    if (attempted == 0) return;
+
+    try {
+      await FirestoreService().saveProgress(
+        uid: uid,
+        exam: widget.exam,
+        section: widget.section,
+        score: correct,
+        totalSessionQuestions: attempted,
+        totalPoolSize:
+            FirestoreService().getPoolSize(widget.exam, widget.section) ??
+            _questions.length,
+      );
+      // Nine questions is a day's practice. It should hold the streak.
+      await updateStreak();
+    } catch (e) {
+      debugPrint('[Quiz] could not bank partial progress: $e');
+    }
   }
 
   Future<void> _saveIncompleteSession() async {
@@ -1213,6 +1261,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
               if (_isNavigating) return;
               setState(() => _isNavigating = true);
               try {
+                await _savePartialProgress();
                 await _saveIncompleteSession();
                 if (!mounted) return;
                 Navigator.of(context).pop(); // close dialog

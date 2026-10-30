@@ -21,6 +21,33 @@ class _C {
   static const gold = Color(0xFFFFD700);
 }
 
+/// How well they did, as a share of what they attempted.
+///
+/// Both of these were absolute counts until a four-question weak-topic
+/// drill answered perfectly scored 4, fell under the "<= 6" branch, and was
+/// congratulated with the bad-score overlay. Every threshold here is a
+/// percentage so that a quiz of any length is judged on its own terms.
+
+/// Ring colour band: 2 is the best, 0 the worst.
+int scoreTier(int accuracyPercent) {
+  if (accuracyPercent >= 80) return 2;
+  if (accuracyPercent >= 50) return 1;
+  return 0;
+}
+
+/// Whether Ustu congratulates them rather than commiserating.
+///
+/// [attempted] is the number of questions answered in THIS sitting; zero
+/// means everything was carried over from a resumed quiz, and Ustu should
+/// say nothing at all rather than judge a session that did not happen.
+bool celebratesScore({required int attempted, required int accuracyPercent}) =>
+    attempted > 0 && accuracyPercent >= 70;
+
+bool commiseratesScore({
+  required int attempted,
+  required int accuracyPercent,
+}) => attempted > 0 && accuracyPercent < 70;
+
 class ResultScreen extends StatefulWidget {
   final List<Question> questions;
   final List<int?> selectedAnswers;
@@ -136,7 +163,12 @@ class _ResultScreenState extends State<ResultScreen>
       });
     }
 
-    if (_correct >= 7) {
+    // Same bug, and this one talks. _correct >= 7 celebrated 7/10 (70%)
+    // and _correct <= 6 commiserated with 4/4 (100%) — Ustu told a student
+    // off for getting every question right. _total == 0 means everything in
+    // this session was carried over from a resumed quiz, so there is nothing
+    // to say either way.
+    if (celebratesScore(attempted: _total, accuracyPercent: _accuracy)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           final name = _firstName();
@@ -150,7 +182,7 @@ class _ResultScreenState extends State<ResultScreen>
       });
     }
 
-    if (_correct <= 6) {
+    if (commiseratesScore(attempted: _total, accuracyPercent: _accuracy)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           final name = _firstName();
@@ -205,11 +237,11 @@ class _ResultScreenState extends State<ResultScreen>
     _wrong = wrong;
     _skipped = skipped;
     _accuracy = _total > 0 ? ((_correct / _total) * 100).round() : 0;
-    _tier = _correct >= 8
-        ? 2
-        : _correct >= 5
-        ? 1
-        : 0;
+    // Share of what they actually attempted, not a raw count. These were
+    // _correct >= 8 and >= 5, which silently assumed every quiz is ten
+    // questions long. A four-question weak-topic drill answered perfectly
+    // scored 4, landed in the bottom tier, and got the red ring.
+    _tier = scoreTier(_accuracy);
     _ringColor = _tier == 2
         ? _C.success
         : _tier == 1
