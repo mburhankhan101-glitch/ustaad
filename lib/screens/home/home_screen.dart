@@ -15,6 +15,7 @@ import 'package:ustaad/core/notifications/reminder_service.dart';
 import 'package:ustaad/core/utils/ustu_overlays.dart';
 import 'package:ustaad/core/utils/connectivity_service.dart';
 import 'package:ustaad/services/haptic_service.dart';
+import 'package:ustaad/screens/home/widgets/exam_countdown_card.dart';
 
 class UstaadColors {
   static const Color background1 = Color(0xFF0A0E2E);
@@ -740,6 +741,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                     ),
                                   ),
                                   const SizedBox(height: 24),
+                                  // The web column carries its own 36px
+                                  // padding, so the card adds none.
+                                  const ExamCountdownCard(
+                                    horizontalPadding: 0,
+                                  ),
+                                  const SizedBox(height: 24),
                                   if (incompleteSession != null) ...[
                                     _FadeSlide(
                                       animation: _continueAnim ?? _noAnim,
@@ -810,6 +817,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 accuracy,
                                 isNewUser,
                               ),
+                            ),
+                            const SizedBox(height: 20),
+                            // Under the streak and today's figures, above
+                            // whatever the student is being asked to do next:
+                            // the countdown is context for the work, not the
+                            // work itself.
+                            _FadeSlide(
+                              animation: _statsAnim ?? _noAnim,
+                              child: const ExamCountdownCard(),
                             ),
                             const SizedBox(height: 20),
                             if (incompleteSession != null) ...[

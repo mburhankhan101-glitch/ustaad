@@ -179,4 +179,13 @@ class Analytics {
 
   Future<void> reminderOpened({required String kind}) =>
       _log('reminder_opened', {'kind': kind});
+
+  // ── Exam date ─────────────────────────────────────────────────────────────
+
+  /// How many students set a test date at all, and how far out it is. The
+  /// second part matters more than it looks: if most dates land inside a
+  /// fortnight, the countdown is being set by students already in a panic,
+  /// and it is arriving too late to change how anyone studies.
+  Future<void> examDateSet({required String exam, required int daysAway}) =>
+      _log('exam_date_set', {'exam': exam, 'days_away': daysAway});
 }
