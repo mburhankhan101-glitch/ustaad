@@ -188,4 +188,18 @@ class Analytics {
   /// and it is arriving too late to change how anyone studies.
   Future<void> examDateSet({required String exam, required int daysAway}) =>
       _log('exam_date_set', {'exam': exam, 'days_away': daysAway});
+
+  /// How a paper went, and whether the student wrote anything beyond tapping
+  /// a mood. The note rate is the honest measure of whether the check-in
+  /// reads as someone asking or as a form to dismiss.
+  Future<void> examDebriefSubmitted({
+    required String exam,
+    required String mood,
+    required bool wroteNote,
+  }) =>
+      _log('exam_debrief_submitted', {
+        'exam': exam,
+        'mood': mood,
+        'wrote_note': wroteNote ? 'yes' : 'no',
+      });
 }

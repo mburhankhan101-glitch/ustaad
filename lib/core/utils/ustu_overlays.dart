@@ -30,14 +30,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:lottie/lottie.dart';
 import 'package:ustaad/core/utils/overlay_queue.dart';
+import 'package:ustaad/core/exam/exam_countdown.dart';
+import 'package:ustaad/screens/home/widgets/exam_debrief_sheet.dart';
 
 /// The order overlays raised together are shown in. Lower goes first.
 abstract final class _OverlayPriority {
   /// A streak just earned is the moment the student came for, so it leads.
   static const streakMap = 0;
-  static const brokenStreak = 1;
-  static const score = 2;
-  static const weakTopic = 3;
+
+  /// A paper just sat outranks a scolding about a dropped streak. A student
+  /// who was in an exam hall yesterday has an excellent reason for the gap,
+  /// and the roast would be the wrong thing to say first.
+  static const examDebrief = 1;
+  static const brokenStreak = 2;
+  static const score = 3;
+  static const weakTopic = 4;
 }
 
 class UstuOverlays {
@@ -295,6 +302,54 @@ class UstuOverlays {
           },
           pageBuilder: (_, __, ___) =>
               _BadScoreContent(name: name, correct: correct, total: total),
+        );
+      },
+    );
+  }
+
+  /// Asks how a paper went, the day after it was sat.
+  ///
+  /// Not barrier-dismissible by accident: a student can leave with "Not now"
+  /// or the back gesture, but a stray tap outside should not throw away a
+  /// note they were part way through typing.
+  static Future<bool> showExamDebrief(
+    BuildContext context, {
+    required String examId,
+    required String firstName,
+    required Future<bool> Function(ExamMood mood, String note) onSubmit,
+  }) {
+    return _present(
+      context,
+      priority: _OverlayPriority.examDebrief,
+      prepare: () async {
+        await _warmSvg('assets/images/exam_ustu.svg');
+        await _warmSvg('assets/images/chai_ustu.svg');
+      },
+      open: () async {
+        HapticFeedback.lightImpact();
+        await showGeneralDialog(
+          context: context,
+          barrierDismissible: false,
+          barrierColor: Colors.black.withOpacity(0.78),
+          transitionDuration: const Duration(milliseconds: 420),
+          transitionBuilder: (_, anim, __, child) {
+            final curved = CurvedAnimation(
+              parent: anim,
+              curve: Curves.easeOutCubic,
+            );
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 1),
+                end: Offset.zero,
+              ).animate(curved),
+              child: FadeTransition(opacity: curved, child: child),
+            );
+          },
+          pageBuilder: (_, __, ___) => ExamDebriefSheet(
+            examId: examId,
+            firstName: firstName,
+            onSubmit: onSubmit,
+          ),
         );
       },
     );

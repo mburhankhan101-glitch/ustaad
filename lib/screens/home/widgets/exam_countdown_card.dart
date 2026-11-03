@@ -17,6 +17,7 @@ import 'package:ustaad/providers/auth_provider.dart';
 import 'package:ustaad/providers/exam_date_provider.dart';
 import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/home/home_screen.dart'; // UstaadColors
+import 'package:ustaad/widgets/common/skeleton_widgets.dart';
 
 class ExamCountdownCard extends ConsumerWidget {
   const ExamCountdownCard({super.key, this.horizontalPadding = 22});
@@ -27,8 +28,20 @@ class ExamCountdownCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final selected = ref.watch(selectedTestsProvider).valueOrNull ?? const [];
-    final dates = ref.watch(examDatesProvider).valueOrNull ?? const {};
+    final selectedAsync = ref.watch(selectedTestsProvider);
+    final datesAsync = ref.watch(examDatesProvider);
+
+    // Both reads prefer the server, so on a cold open they land a second or
+    // two after everything else on the screen. Treating "still loading" as
+    // "no exams" is what made the card drop in late, after the rest of home
+    // had settled. Hold its space with a placeholder instead, so the layout
+    // never moves.
+    if (selectedAsync.isLoading || datesAsync.isLoading) {
+      return _placeholder();
+    }
+
+    final selected = selectedAsync.valueOrNull ?? const <String>[];
+    final dates = datesAsync.valueOrNull ?? const <String, DateTime>{};
 
     // Nothing to count down to and nothing to set a date for. A student who
     // has not picked an exam yet is mid-onboarding; prompting them for a date
@@ -61,6 +74,43 @@ class ExamCountdownCard extends ConsumerWidget {
           child: target == null
               ? _unsetBody(accent)
               : _countdownBody(target, accent, urgency),
+        ),
+      ),
+    );
+  }
+
+  // ── Waiting for the two reads ────────────────────────────────────────────
+
+  /// The card's own footprint, shimmering. Its height has to match the real
+  /// card or the fix just moves the jump to when the data lands: 14 top + 14
+  /// bottom padding either side of a 40px body, same as the rows below.
+  Widget _placeholder() {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withOpacity(0.07)),
+        ),
+        child: const SizedBox(
+          height: 40,
+          child: Row(
+            children: [
+              ShimmerBox(width: 28, height: 28, radius: 8),
+              SizedBox(width: 14),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ShimmerBox(width: 120, height: 15, radius: 5),
+                  SizedBox(height: 7),
+                  ShimmerBox(width: 78, height: 11, radius: 4),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

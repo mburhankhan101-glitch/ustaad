@@ -205,6 +205,146 @@ void main() {
     });
   });
 
+  group('pendingDebrief decides when to ask how it went', () {
+    final now = DateTime(2026, 11, 10, 9, 0);
+
+    test('asks the day after, not on the day itself', () {
+      // The paper may be in the afternoon. Asking how it went while they are
+      // still sitting it would be worse than not asking at all.
+      expect(
+        ExamCountdown.pendingDebrief(
+          dates: {'MDCAT': DateTime(2026, 11, 10)},
+          debriefed: const {},
+          selectedTests: const ['MDCAT'],
+          now: now,
+        ),
+        isNull,
+      );
+
+      final next = ExamCountdown.pendingDebrief(
+        dates: {'MDCAT': DateTime(2026, 11, 9)},
+        debriefed: const {},
+        selectedTests: const ['MDCAT'],
+        now: now,
+      );
+      expect(next!.examId, 'MDCAT');
+      expect(next.daysAgo, 1);
+    });
+
+    test('does not ask about a paper still ahead', () {
+      expect(
+        ExamCountdown.pendingDebrief(
+          dates: {'MDCAT': DateTime(2026, 11, 20)},
+          debriefed: const {},
+          selectedTests: const ['MDCAT'],
+          now: now,
+        ),
+        isNull,
+      );
+    });
+
+    test('stops asking once the window has passed', () {
+      ExamDebriefPrompt? at(int daysAgo) => ExamCountdown.pendingDebrief(
+            dates: {'MDCAT': now.subtract(Duration(days: daysAgo))},
+            debriefed: const {},
+            selectedTests: const ['MDCAT'],
+            now: now,
+          );
+      expect(at(14), isNotNull, reason: 'last day of the window');
+      expect(at(15), isNull, reason: 'one day past it');
+      expect(at(40), isNull);
+    });
+
+    test('never asks twice about the same sitting', () {
+      final date = DateTime(2026, 11, 8);
+      final key = ExamCountdown.debriefKey('MDCAT', date);
+      expect(
+        ExamCountdown.pendingDebrief(
+          dates: {'MDCAT': date},
+          debriefed: {key},
+          selectedTests: const ['MDCAT'],
+          now: now,
+        ),
+        isNull,
+      );
+    });
+
+    test('a resit on a different date is asked about again', () {
+      // The key carries the date, so last year's sitting does not silence
+      // this year's.
+      final old = ExamCountdown.debriefKey('MDCAT', DateTime(2025, 11, 8));
+      final prompt = ExamCountdown.pendingDebrief(
+        dates: {'MDCAT': DateTime(2026, 11, 8)},
+        debriefed: {old},
+        selectedTests: const ['MDCAT'],
+        now: now,
+      );
+      expect(prompt!.examId, 'MDCAT');
+    });
+
+    test('picks the most recent when two were sat close together', () {
+      final prompt = ExamCountdown.pendingDebrief(
+        dates: {
+          'NUMS': DateTime(2026, 11, 2),
+          'MDCAT': DateTime(2026, 11, 8),
+        },
+        debriefed: const {},
+        selectedTests: const ['NUMS', 'MDCAT'],
+        now: now,
+      );
+      expect(prompt!.examId, 'MDCAT', reason: 'the one on their mind');
+      expect(prompt.daysAgo, 2);
+    });
+
+    test('falls through to the older one once the recent is answered', () {
+      final answered =
+          ExamCountdown.debriefKey('MDCAT', DateTime(2026, 11, 8));
+      final prompt = ExamCountdown.pendingDebrief(
+        dates: {
+          'NUMS': DateTime(2026, 11, 2),
+          'MDCAT': DateTime(2026, 11, 8),
+        },
+        debriefed: {answered},
+        selectedTests: const ['NUMS', 'MDCAT'],
+        now: now,
+      );
+      expect(prompt!.examId, 'NUMS');
+    });
+
+    test('ignores an exam the student no longer has selected', () {
+      expect(
+        ExamCountdown.pendingDebrief(
+          dates: {'NUST-NET': DateTime(2026, 11, 8)},
+          debriefed: const {},
+          selectedTests: const ['MDCAT'],
+          now: now,
+        ),
+        isNull,
+      );
+    });
+
+    test('debriefKey is stable and ignores the time of day', () {
+      expect(
+        ExamCountdown.debriefKey('NUST-NET', DateTime(2026, 11, 8, 23, 59)),
+        'NUST-NET_2026-11-08',
+      );
+      expect(
+        ExamCountdown.debriefKey('NUST-NET', DateTime(2026, 1, 5)),
+        'NUST-NET_2026-01-05',
+        reason: 'single-digit months and days are padded',
+      );
+    });
+  });
+
+  group('every mood has something to say', () {
+    test('no mood label is empty, and none of them reads as a failure', () {
+      for (final mood in ExamMood.values) {
+        expect(mood.label.trim(), isNotEmpty);
+      }
+      expect(ExamMood.values.length, 3);
+    });
+  });
+
   group('parseExamDates survives whatever is on the document', () {
     test('a missing or malformed field gives an empty map', () {
       expect(parseExamDates(null), isEmpty);
@@ -240,6 +380,30 @@ void main() {
         'examDates': {'MDCAT': DateTime(2026, 12, 1, 23, 59, 59)},
       });
       expect(parsed['MDCAT'], DateTime(2026, 12, 1));
+    });
+  });
+
+  group('parseDebriefed', () {
+    test('a missing or malformed field gives an empty set', () {
+      expect(parseDebriefed(null), isEmpty);
+      expect(parseDebriefed({}), isEmpty);
+      expect(parseDebriefed({'examDebriefs': 'not a map'}), isEmpty);
+    });
+
+    test('keys come back whatever the values are', () {
+      // Only the presence of the key matters. The value is a timestamp today,
+      // but a document written by an older build may hold anything.
+      final parsed = parseDebriefed({
+        'examDebriefs': {
+          'MDCAT_2026-11-08': DateTime(2026, 11, 9),
+          'NUMS_2026-11-02': true,
+        },
+      });
+      expect(parsed, {'MDCAT_2026-11-08', 'NUMS_2026-11-02'});
+    });
+
+    test('empty keys are dropped', () {
+      expect(parseDebriefed({'examDebriefs': {'': 1}}), isEmpty);
     });
   });
 }

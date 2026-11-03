@@ -51,6 +51,39 @@ class ExamTarget {
   String toString() => 'ExamTarget($examId, $daysLeft days)';
 }
 
+/// An exam that has been sat, which the student has not been asked about yet.
+@immutable
+class ExamDebriefPrompt {
+  const ExamDebriefPrompt({
+    required this.examId,
+    required this.date,
+    required this.daysAgo,
+  });
+
+  final String examId;
+
+  /// Local midnight on the day of the paper.
+  final DateTime date;
+
+  /// Calendar days since. Always 1 or more: the paper may still be ahead of
+  /// them on the day itself, so asking "how did it go" is only honest from
+  /// the following day.
+  final int daysAgo;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExamDebriefPrompt &&
+      other.examId == examId &&
+      other.date == date &&
+      other.daysAgo == daysAgo;
+
+  @override
+  int get hashCode => Object.hash(examId, date, daysAgo);
+
+  @override
+  String toString() => 'ExamDebriefPrompt($examId, $daysAgo days ago)';
+}
+
 /// How loudly to say it. The home card and (later) the reminder copy both
 /// read this, so the thresholds live in one place.
 enum ExamUrgency {
@@ -142,4 +175,73 @@ class ExamCountdown {
   /// mis-typed year is a worse outcome than a narrow range.
   static DateTime lastSensibleDate(DateTime now) =>
       DateTime(now.year + 2, now.month, now.day);
+
+  // ── After the paper ───────────────────────────────────────────────────────
+
+  /// How long after a paper it is still worth asking how it went. Past this
+  /// the question has gone stale: a student opening the app five weeks later
+  /// does not want to be stopped and asked about something they have moved
+  /// on from.
+  static const int debriefWindowDays = 14;
+
+  /// Identifies one sitting of one exam, so a student is asked once and not
+  /// again. The date is part of the key on purpose: a resit next year is a
+  /// different paper and deserves its own question.
+  static String debriefKey(String examId, DateTime date) {
+    final d = '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+    return '${examId}_$d';
+  }
+
+  /// The paper to ask about, or null when there is nothing to ask.
+  ///
+  /// Null unless all of these hold: the date has passed, it was within
+  /// [debriefWindowDays], the student still has that exam selected, and they
+  /// have not already been asked. With more than one sat recently it picks
+  /// the most recent, because that is the one on their mind.
+  static ExamDebriefPrompt? pendingDebrief({
+    required Map<String, DateTime> dates,
+    required Set<String> debriefed,
+    required List<String> selectedTests,
+    required DateTime now,
+  }) {
+    ExamDebriefPrompt? best;
+    for (final entry in dates.entries) {
+      if (!selectedTests.contains(entry.key)) continue;
+
+      final daysAgo = -daysUntil(entry.value, now);
+      // Not yet sat, or sat today — the paper may still be ahead of them.
+      if (daysAgo < 1) continue;
+      if (daysAgo > debriefWindowDays) continue;
+      if (debriefed.contains(debriefKey(entry.key, entry.value))) continue;
+
+      if (best == null || daysAgo < best.daysAgo) {
+        best = ExamDebriefPrompt(
+          examId: entry.key,
+          date: DateTime(
+            entry.value.year,
+            entry.value.month,
+            entry.value.day,
+          ),
+          daysAgo: daysAgo,
+        );
+      }
+    }
+    return best;
+  }
+}
+
+/// What a student says about how the paper went. The wording matters more
+/// than the taxonomy: these are the three things people actually report, and
+/// a student who had a bad day should not have to pick "poor" about
+/// themselves.
+enum ExamMood {
+  good('It went well'),
+  mixed('Could have gone better'),
+  rough('It was rough');
+
+  const ExamMood(this.label);
+
+  final String label;
 }

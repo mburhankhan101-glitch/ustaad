@@ -16,6 +16,10 @@ import 'package:ustaad/core/utils/ustu_overlays.dart';
 import 'package:ustaad/core/utils/connectivity_service.dart';
 import 'package:ustaad/services/haptic_service.dart';
 import 'package:ustaad/screens/home/widgets/exam_countdown_card.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:ustaad/core/analytics/analytics_service.dart';
+import 'package:ustaad/core/exam/exam_countdown.dart';
+import 'package:ustaad/providers/exam_date_provider.dart';
 
 class UstaadColors {
   static const Color background1 = Color(0xFF0A0E2E);
@@ -264,6 +268,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   String? _greetingForName;
   bool _weakTopicShown = false;
   bool _brokenStreakShown = false;
+  bool _examDebriefShown = false;
   List<String> _cachedSelectedTests =
       []; // cached so _showQuizPicker can filter tabs
 
@@ -495,6 +500,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
+  /// Raises the post-exam check-in and persists whatever the student says.
+  ///
+  /// The sheet reports whether the write succeeded so it can offer a retry
+  /// rather than claim something was sent when it was not. On success the
+  /// plan is re-read, which both hides the question for good and lets the
+  /// countdown card move on to the next paper.
+  void _showExamDebrief(ExamDebriefPrompt due) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      await UstuOverlays.showExamDebrief(
+        context,
+        examId: due.examId,
+        firstName: (user.displayName ?? '').split(' ').first,
+        onSubmit: (mood, note) async {
+          try {
+            final info = await PackageInfo.fromPlatform();
+            await saveExamDebrief(
+              uid: user.uid,
+              examId: due.examId,
+              examDate: due.date,
+              debriefKey: ExamCountdown.debriefKey(due.examId, due.date),
+              mood: mood.name,
+              note: note,
+              displayName: user.displayName ?? '',
+              email: user.email ?? '',
+              appVersion: '${info.version}+${info.buildNumber}',
+            );
+            Analytics.instance.examDebriefSubmitted(
+              exam: due.examId,
+              mood: mood.name,
+              wroteNote: note.isNotEmpty,
+            );
+            if (mounted) ref.invalidate(examPlanProvider);
+            return true;
+          } catch (e) {
+            debugPrint('[ExamDebrief] save failed: $e');
+            return false;
+          }
+        },
+      );
+    });
+  }
+
   void _showWeakTopicOverlay({
     required String topTopic,
     required int topCount,
@@ -615,6 +666,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() => _cachedSelectedTests = selectedTests);
           });
+        }
+
+        // ── A paper just sat ─────────────────────────────────────────────
+        // Asked once, the day after, and only inside the fortnight after the
+        // date. The marker that stops it being asked twice lives on the user
+        // document, so it survives a reinstall; _examDebriefShown only keeps
+        // one session from raising it on every rebuild.
+        if (!_examDebriefShown && selectedTests.isNotEmpty) {
+          final plan = ref.watch(examPlanProvider).valueOrNull;
+          if (plan != null) {
+            final due = ExamCountdown.pendingDebrief(
+              dates: plan.dates,
+              debriefed: plan.debriefed,
+              selectedTests: selectedTests,
+              now: DateTime.now(),
+            );
+            if (due != null) {
+              _examDebriefShown = true;
+              _showExamDebrief(due);
+            }
+          }
         }
 
         // ── Weak topics ──────────────────────────────────────────────────
