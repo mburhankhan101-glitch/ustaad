@@ -32,6 +32,7 @@ import 'package:lottie/lottie.dart';
 import 'package:ustaad/core/utils/overlay_queue.dart';
 import 'package:ustaad/core/exam/exam_countdown.dart';
 import 'package:ustaad/screens/home/widgets/exam_debrief_sheet.dart';
+import 'package:ustaad/screens/home/widgets/notification_ask_sheet.dart';
 
 /// The order overlays raised together are shown in. Lower goes first.
 abstract final class _OverlayPriority {
@@ -45,6 +46,10 @@ abstract final class _OverlayPriority {
   static const brokenStreak = 2;
   static const score = 3;
   static const weakTopic = 4;
+
+  /// A request, not a moment. Everything else on home outranks it, and it
+  /// loses nothing by waiting another five days.
+  static const notificationAsk = 5;
 }
 
 class UstuOverlays {
@@ -302,6 +307,56 @@ class UstuOverlays {
           },
           pageBuilder: (_, __, ___) =>
               _BadScoreContent(name: name, correct: correct, total: total),
+        );
+      },
+    );
+  }
+
+  /// Ustu's own ask, before the system's one-shot permission dialog.
+  ///
+  /// Lowest priority on home: a celebration, a paper just sat, or a broken
+  /// streak all matter more than a request, and this one can wait five days
+  /// at no cost. Dismissible by a tap outside, which counts as "not now" —
+  /// unlike the system dialog, where a no is permanent.
+  static Future<bool> showNotificationAsk(
+    BuildContext context, {
+    required String title,
+    required String body,
+    required String confirmLabel,
+    required VoidCallback onYes,
+    required VoidCallback onNotNow,
+  }) {
+    return _present(
+      context,
+      priority: _OverlayPriority.notificationAsk,
+      prepare: () => _warmSvg('assets/images/app_ustu.svg'),
+      open: () async {
+        await showGeneralDialog(
+          context: context,
+          barrierDismissible: true,
+          barrierLabel: 'Abhi nahi',
+          barrierColor: Colors.black.withOpacity(0.72),
+          transitionDuration: const Duration(milliseconds: 380),
+          transitionBuilder: (_, anim, __, child) {
+            final curved = CurvedAnimation(
+              parent: anim,
+              curve: Curves.easeOutCubic,
+            );
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 1),
+                end: Offset.zero,
+              ).animate(curved),
+              child: FadeTransition(opacity: curved, child: child),
+            );
+          },
+          pageBuilder: (_, __, ___) => NotificationAskSheet(
+            title: title,
+            body: body,
+            confirmLabel: confirmLabel,
+            onYes: onYes,
+            onNotNow: onNotNow,
+          ),
         );
       },
     );

@@ -268,6 +268,29 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
     }
   }
 
+  /// Records where a student gave up.
+  ///
+  /// Fired before the saves rather than after, so a failed write cannot cost
+  /// us the one signal that explains the gap between 323 quizzes started and
+  /// 138 finished. Not awaited: analytics must never hold up leaving a
+  /// screen, and the event survives the screen being disposed.
+  void _logAbandoned() {
+    if (_quizCompleted || _questions.isEmpty) return;
+    var answered = 0;
+    for (var i = 0; i < _questions.length; i++) {
+      final a = _userAnswers[i];
+      if (a == null || a == -2) continue; // unreached, or an earlier sitting
+      answered++;
+    }
+    Analytics.instance.quizAbandoned(
+      exam: widget.exam,
+      section: widget.section,
+      atQuestion: _currentIndex + 1,
+      total: _questions.length,
+      answered: answered,
+    );
+  }
+
   Future<void> _saveIncompleteSession() async {
     if (_quizCompleted || _questions.isEmpty || widget.topic != null) return;
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -1261,6 +1284,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
               if (_isNavigating) return;
               setState(() => _isNavigating = true);
               try {
+                _logAbandoned();
                 await _savePartialProgress();
                 await _saveIncompleteSession();
                 if (!mounted) return;

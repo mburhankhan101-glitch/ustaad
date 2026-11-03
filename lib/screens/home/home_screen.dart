@@ -17,6 +17,8 @@ import 'package:ustaad/core/utils/connectivity_service.dart';
 import 'package:ustaad/services/haptic_service.dart';
 import 'package:ustaad/screens/home/widgets/exam_countdown_card.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ustaad/core/notifications/push_prompt.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/core/exam/exam_countdown.dart';
 import 'package:ustaad/providers/exam_date_provider.dart';
@@ -269,6 +271,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _weakTopicShown = false;
   bool _brokenStreakShown = false;
   bool _examDebriefShown = false;
+  bool _pushAskShown = false;
   List<String> _cachedSelectedTests =
       []; // cached so _showQuizPicker can filter tabs
 
@@ -506,6 +509,82 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// rather than claim something was sent when it was not. On success the
   /// plan is re-read, which both hides the question for good and lets the
   /// countdown card move on to the next paper.
+  static const _kSoftAsks = 'push_soft_asks_v1';
+  static const _kSoftAskAt = 'push_soft_ask_at_v1';
+  static const _kHardAskSpent = 'push_hard_ask_spent_v1';
+
+  /// Offers to turn reminders on, in Ustu's voice, before the system's
+  /// one-shot dialog is spent.
+  ///
+  /// Every gate lives in PushPrompt so the rules can be tested; this only
+  /// reads the state and records the answer. The OS is asked whether
+  /// permission is already granted rather than trusting a flag of ours,
+  /// because a student can change it in Settings and we never hear about it.
+  Future<void> _maybeAskForNotifications(int totalSolved) async {
+    if (_pushAskShown) return;
+    _pushAskShown = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final asks = prefs.getInt(_kSoftAsks) ?? 0;
+      final lastRaw = prefs.getString(_kSoftAskAt);
+      final state = PushPromptState(
+        alreadyGranted: await PushService.instance.hasPermission(),
+        softAsks: asks,
+        lastSoftAsk: lastRaw == null ? null : DateTime.tryParse(lastRaw),
+        questionsSolved: totalSolved,
+        hardAskSpent: prefs.getBool(_kHardAskSpent) ?? false,
+      );
+      if (!PushPrompt.shouldSoftAsk(state, DateTime.now())) return;
+      if (!mounted) return;
+
+      final copy = PushPrompt.copyFor(asks);
+      var answered = false;
+
+      final shown = await UstuOverlays.showNotificationAsk(
+        context,
+        title: copy[0],
+        body: copy[1],
+        confirmLabel: copy[2],
+        onYes: () async {
+          answered = true;
+          Navigator.of(context).maybePop();
+          Analytics.instance.pushSoftAskAnswered(
+            attempt: asks + 1,
+            accepted: true,
+          );
+          // Only now is the system dialog spent, and only on someone who has
+          // already said yes to being asked.
+          await prefs.setBool(_kHardAskSpent, true);
+          final granted = await PushService.instance.requestPermission();
+          if (granted) await ReminderService.instance.init();
+        },
+        onNotNow: () {
+          answered = true;
+          Navigator.of(context).maybePop();
+          Analytics.instance.pushSoftAskAnswered(
+            attempt: asks + 1,
+            accepted: false,
+          );
+        },
+      );
+
+      if (!shown) return;
+      // Counted whether they chose or dismissed by tapping outside, so a card
+      // swiped away still waits five days before coming back.
+      if (!answered) {
+        Analytics.instance.pushSoftAskAnswered(
+          attempt: asks + 1,
+          accepted: false,
+        );
+      }
+      Analytics.instance.pushSoftAskShown(attempt: asks + 1);
+      await prefs.setInt(_kSoftAsks, asks + 1);
+      await prefs.setString(_kSoftAskAt, DateTime.now().toIso8601String());
+    } catch (e) {
+      debugPrint('[Home] notification ask skipped: $e');
+    }
+  }
+
   void _showExamDebrief(ExamDebriefPrompt due) {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -703,6 +782,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             }
           }
         }
+
+        // ── Reminders, if Ustu may ───────────────────────────────────────
+        // Gated on lifetime questions answered rather than quizzes finished.
+        // The old ask lived on the result screen, which only a finished quiz
+        // reaches, so the 57% who abandon one were never asked at all. It
+        // takes the lowest priority in the overlay queue, so it never lands
+        // on top of a celebration or a paper just sat.
+        _maybeAskForNotifications(
+          (progressData?['totalSolved'] as num?)?.toInt() ?? 0,
+        );
 
         // ── Weak topics ──────────────────────────────────────────────────
         final weakTopics = progressData?['weakTopics'] as Map<String, dynamic>?;

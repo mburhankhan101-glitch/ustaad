@@ -192,6 +192,58 @@ class Analytics {
   /// How a paper went, and whether the student wrote anything beyond tapping
   /// a mood. The note rate is the honest measure of whether the check-in
   /// reads as someone asking or as a form to dismiss.
+  // ── Quizzes left unfinished ───────────────────────────────────────────────
+
+  /// Where a student gave up. 323 quizzes were started in a month and 138
+  /// finished, and nothing recorded which question the other 185 stopped at —
+  /// so there was no way to tell a student who opened the wrong section and
+  /// bounced from one who got tired at question eight. Those have opposite
+  /// fixes, and `stage` is what separates them.
+  Future<void> quizAbandoned({
+    required String exam,
+    required String section,
+    required int atQuestion,
+    required int total,
+    required int answered,
+  }) =>
+      _log('quiz_abandoned', {
+        'exam': exam,
+        'section': section,
+        'at_question': atQuestion,
+        'total': total,
+        'answered': answered,
+        'stage': _stageOf(atQuestion, total),
+      });
+
+  /// A readable bucket, because a raw question number needs registering as a
+  /// custom metric before GA4 will chart it, while a string lands as a
+  /// dimension and can be read straight off the events report.
+  static String _stageOf(int atQuestion, int total) {
+    if (total <= 0) return 'unknown';
+    if (atQuestion <= 1) return 'first_question';
+    final through = atQuestion / total;
+    if (through <= 0.34) return 'early';
+    if (through <= 0.67) return 'middle';
+    return 'late';
+  }
+
+  // ── Notification permission ───────────────────────────────────────────────
+
+  /// Ustu's own ask, before the system's. Paired with [pushPermissionAnswered]
+  /// this gives the real funnel: how many were asked softly, how many said
+  /// yes, and how many of those the OS then actually granted.
+  Future<void> pushSoftAskShown({required int attempt}) =>
+      _log('push_soft_ask_shown', {'attempt': attempt});
+
+  Future<void> pushSoftAskAnswered({
+    required int attempt,
+    required bool accepted,
+  }) =>
+      _log('push_soft_ask_answered', {
+        'attempt': attempt,
+        'accepted': accepted ? 'yes' : 'no',
+      });
+
   Future<void> examDebriefSubmitted({
     required String exam,
     required String mood,

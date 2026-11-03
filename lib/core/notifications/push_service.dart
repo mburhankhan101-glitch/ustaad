@@ -70,12 +70,33 @@ class PushService {
     _tokenSub = _fm.onTokenRefresh.listen(_persistToken);
   }
 
+  /// Whether notifications are already allowed, without showing anything.
+  ///
+  /// Read from the OS rather than from our own records, because a student can
+  /// grant or revoke it in Settings and we would never hear about it. Returns
+  /// false if the check itself fails, which keeps the soft ask available
+  /// rather than silently deciding a student has already been asked.
+  Future<bool> hasPermission() async {
+    try {
+      final settings = await _fm.getNotificationSettings();
+      return settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (e) {
+      debugPrint('[Push] permission check failed: $e');
+      return false;
+    }
+  }
+
   /// Asks for the notification permission.
   ///
   /// Deliberately not called at launch. On Android 13+ this is a one-shot
   /// system dialog: ask on first run, before the student knows what Ustaad is,
-  /// and most of them decline permanently. Call it after a first completed
-  /// quiz, when a streak reminder is obviously worth something.
+  /// and most of them decline permanently.
+  ///
+  /// Now only called once a student has said yes to the softer question Ustu
+  /// asks on home — see PushPrompt. It used to fire from the result screen,
+  /// which is only reachable by finishing a quiz, so the 57% who abandon one
+  /// were never asked at all: 23 of 74 users had ever seen this dialog.
   Future<bool> requestPermission() async {
     final settings = await _fm.requestPermission(
       alert: true,
