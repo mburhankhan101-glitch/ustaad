@@ -281,7 +281,11 @@ class ExamCountdownCard extends ConsumerWidget {
         exam: examId,
         daysAway: ExamCountdown.daysUntil(picked, DateTime.now()),
       );
-      ref.invalidate(examDatesProvider);
+      // Nothing to invalidate: examPlanProvider watches the document, and
+      // Firestore echoes the write to its own listeners before the server
+      // acknowledges it, so the card has already redrawn by now. Invalidating
+      // would tear the listener down and rebuild it, which is the flicker this
+      // replaced.
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

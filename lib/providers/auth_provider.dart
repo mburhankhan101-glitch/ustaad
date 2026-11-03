@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/auth/test_selection.dart';
 import 'package:ustaad/screens/auth/verify_email_screen.dart';
@@ -21,6 +22,26 @@ enum AuthStatus {
   authenticated,
   emailUnverified,
   unauthenticated,
+}
+
+/// Whether a session existed the last time the app ran.
+///
+/// SplashScreen needs this because `currentUser` can still be null while
+/// Firebase restores the session from disk. Without knowing that a session is
+/// expected, the splash either gives up too early and shows the login screen
+/// to someone who is signed in, or makes every signed-out student wait for a
+/// restore that is never coming. This says which of the two it is.
+const String kHadSessionKey = 'had_session_v1';
+
+/// Records whether there is a session to restore. Never allowed to throw:
+/// failing to write a hint must not break signing in or out.
+Future<void> rememberSession(bool signedIn) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(kHadSessionKey, signedIn);
+  } catch (e) {
+    debugPrint('[Auth] could not record the session hint: $e');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +128,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // This means reload() calls are SILENT to the stream — only reloadUser()
     // handles the email verification state update, with no race condition.
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      // Records that there is a session for SplashScreen to wait for on the
+      // next cold start, whichever route signed the student in.
+      //
+      // Only ever written on a non-null user, never cleared here. This stream
+      // emits null on a cold start while the session is still being restored,
+      // and writing false on that would erase the very hint the splash needs —
+      // which is the bug this is part of fixing. signOut() clears it instead,
+      // where a null genuinely means signed out.
+      if (user != null) unawaited(rememberSession(true));
+
       // Respect the busy flag: if an auth operation is in progress,
       // it will set the state itself when it completes.
       if (_isBusy) return;
@@ -340,6 +371,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // sign-out event and set state to unauthenticated automatically.
     // We just call the service and let the authStateChanges() stream
     // handle the state update.
+    // Cleared here and nowhere else. This is the one place a missing user
+    // definitely means signed out rather than not-restored-yet, so it is the
+    // only safe place to tell the splash to stop waiting for a session.
+    await rememberSession(false);
+
     try {
       await _authService.logout();
       // Belt-and-suspenders: set state immediately so the UI reacts

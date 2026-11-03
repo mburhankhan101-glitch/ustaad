@@ -40,34 +40,44 @@ class ExamPlan {
   final Set<String> debriefed;
 }
 
-final examPlanProvider = FutureProvider<ExamPlan>((ref) async {
+/// Watches the user document rather than fetching it once.
+///
+/// It used to be a one-shot read that had to be invalidated by hand after a
+/// write, and that broke as soon as a second provider was derived from it:
+/// the card invalidated the derived provider, which then recomputed from this
+/// one's still-cached value, so changing a date did nothing until the app was
+/// restarted. A student who corrects a date and sees no change assumes the app
+/// lost it.
+///
+/// A snapshot stream removes that whole class of bug. Firestore echoes a local
+/// write to its listeners before the server has acknowledged it, so the
+/// countdown updates the instant the date is picked — and a change made on
+/// another device arrives without anyone invalidating anything.
+final examPlanProvider = StreamProvider<ExamPlan>((ref) {
   final uid = ref.watch(authProvider).user?.uid;
-  if (uid == null) return const ExamPlan.empty();
+  if (uid == null) return Stream.value(const ExamPlan.empty());
 
-  final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
-
-  DocumentSnapshot<Map<String, dynamic>>? doc;
-  try {
-    doc = await docRef.get(const GetOptions(source: Source.server));
-  } catch (_) {
-    try {
-      doc = await docRef.get(const GetOptions(source: Source.cache));
-    } catch (_) {
-      doc = null;
-    }
-  }
-
-  final data = doc?.data();
-  return ExamPlan(
-    dates: parseExamDates(data),
-    debriefed: parseDebriefed(data),
-  );
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((doc) {
+        final data = doc.data();
+        return ExamPlan(
+          dates: parseExamDates(data),
+          debriefed: parseDebriefed(data),
+        );
+      })
+      // A dropped listener must not leave the card shimmering for ever.
+      .handleError((Object e) {
+        debugPrint('[ExamPlan] snapshot failed: $e');
+      });
 });
 
 /// Exam id -> the day of that paper, at local midnight. Derived, so the card
-/// keeps a simple dependency and the document is still only read once.
-final examDatesProvider = FutureProvider<Map<String, DateTime>>(
-  (ref) async => (await ref.watch(examPlanProvider.future)).dates,
+/// keeps a simple dependency and the document is still only watched once.
+final examDatesProvider = StreamProvider<Map<String, DateTime>>(
+  (ref) => ref.watch(examPlanProvider.stream).map((plan) => plan.dates),
 );
 
 /// Pulls `examDates` out of a user document.

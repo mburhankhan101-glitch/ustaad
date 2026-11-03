@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ustaad/providers/auth_provider.dart';
 import 'package:ustaad/screens/auth/login_screen.dart';
 import 'package:ustaad/screens/auth/signup_screen.dart';
 import 'package:ustaad/screens/auth/verify_email_screen.dart';
@@ -107,24 +108,44 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     // login screen. That is the "I have to log in again every time I open
     // the app" report.
     //
-    // authStateChanges emits once restoration has actually finished, so the
-    // first event is the real answer. The timeout is a backstop: if the
-    // stream never produces anything we fall back to currentUser rather than
-    // hanging on the splash forever.
+    // Taking `.first` was the bug, not the fix. authStateChanges() emits the
+    // state it holds at the moment you subscribe, and on a cold start that can
+    // be null while restoration is still running — so the first event is often
+    // the wrong answer, and this screen turned it into the login screen. It
+    // looked intermittent because it is a race.
+    //
+    // So: trust currentUser when it is already populated, and otherwise wait
+    // for a non-null event instead of accepting a null. A student who was
+    // signed in last time is worth waiting four seconds for; one who was not
+    // never waits at all, because hadSession says so.
+    final prefs = await SharedPreferences.getInstance();
+    final hadSession = prefs.getBool(kHadSessionKey) ?? false;
+
     User? user;
     try {
-      user = await FirebaseAuth.instance.authStateChanges().first.timeout(
-        const Duration(seconds: 5),
-      );
-    } catch (_) {
-      // Timed out, or Firebase is not initialised. currentUser may still be
-      // populated by now, so it is a better guess than nothing.
+      user = FirebaseAuth.instance.currentUser;
+      if (user == null && hadSession) {
+        user = await FirebaseAuth.instance
+            .authStateChanges()
+            .firstWhere((u) => u != null)
+            .timeout(const Duration(seconds: 4), onTimeout: () => null);
+      }
+    } catch (e) {
+      // A closed stream, or Firebase not initialised. currentUser is still a
+      // better guess than nothing.
+      debugPrint('[Splash] auth restore failed: $e');
       try {
         user = FirebaseAuth.instance.currentUser;
       } catch (_) {
         user = null;
       }
     }
+
+    // Keep the flag honest both ways, so only a student with a session to
+    // restore ever pays for the wait above.
+    try {
+      await prefs.setBool(kHadSessionKey, user != null);
+    } catch (_) {}
 
     if (user != null) {
       if (user.emailVerified) {

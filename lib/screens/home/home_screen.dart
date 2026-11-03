@@ -614,7 +614,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               mood: mood.name,
               wroteNote: note.isNotEmpty,
             );
-            if (mounted) ref.invalidate(examPlanProvider);
+            // The debrief marker lands on the same watched document, so the
+            // question stops being asked without anything being invalidated.
             return true;
           } catch (e) {
             debugPrint('[ExamDebrief] save failed: $e');
