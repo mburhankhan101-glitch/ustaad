@@ -38,6 +38,7 @@ import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../analytics/analytics_service.dart';
+import 'reminder_plan.dart';
 
 class ReminderService {
   ReminderService._();
@@ -46,48 +47,10 @@ class ReminderService {
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
 
-  /// One id, so a second schedule overwrites the first instead of stacking.
-  static const _streakId = 1001;
-
   static const _channelId = 'ustaad_reminders';
   static const _channelName = 'Practice reminders';
   static const _channelDescription =
-      'Reminds you before your streak breaks. One a day at most.';
-
-  /// Evening, not morning. Students here practise after Maghrib and after
-  /// dinner; a 9am reminder lands in a school corridor and gets swiped.
-  static const _hour = 20;
-  static const _minute = 0;
-
-  /// Below this there is no streak worth protecting, and "your streak is
-  /// about to break" reads as nonsense to someone on day one.
-  static const _minStreakToWarn = 2;
-
-  // Rotated so a student who misses four evenings running is not told the
-  // same sentence four times. Same voice as the home screen: Ustu, Roman
-  // Urdu, more friend than invigilator.
-  static const _lines = <List<String>>[
-    [
-      'Streak tootne wali hai! 🔥',
-      'Ustu keh raha hai: 5 minute nikalo, {n} din ka kaam bach jayega.',
-    ],
-    [
-      '{n} din ki mehnat 😬',
-      'Aaj kuch nahi kiya. Ek chhota quiz, aur streak safe.',
-    ],
-    [
-      'Ustu intezaar kar raha hai 🦉',
-      '{n} din se streak chal rahi hai. Aaj bhi chalni chahiye na?',
-    ],
-    [
-      'Abhi waqt hai ⏰',
-      'Soney se pehle 5 sawal. {n} din ki streak bachane ke liye bas itna.',
-    ],
-    [
-      'Yaad dilane aaya hoon 📚',
-      'Tumhari {n} din ki streak aaj khatam ho jayegi. Mujhe rokna hai?',
-    ],
-  ];
+      'Nudges you to practise, and counts down to your test. One a day at most.';
 
   Future<void> init() async {
     if (_ready) return;
@@ -113,10 +76,30 @@ class ReminderService {
             requestSoundPermission: false,
           ),
         ),
-        onDidReceiveNotificationResponse: (_) {
-          Analytics.instance.reminderOpened(kind: 'streak');
+        onDidReceiveNotificationResponse: (response) {
+          Analytics.instance.reminderOpened(
+            kind: response.payload ?? 'unknown',
+          );
         },
       );
+
+      // The handler above only fires when the app was already running. A
+      // reminder lands at 8pm, when Ustaad is almost certainly killed, and
+      // that tap cold-starts the app and is reported here instead. Without
+      // this branch the tap is never counted, which is why reminder_opened
+      // read zero for four days while reminders were demonstrably being
+      // armed — the one number that says whether any of this works was
+      // measuring only the rarest case.
+      try {
+        final launch = await _plugin.getNotificationAppLaunchDetails();
+        if (launch?.didNotificationLaunchApp ?? false) {
+          Analytics.instance.reminderOpened(
+            kind: launch?.notificationResponse?.payload ?? 'unknown',
+          );
+        }
+      } catch (e) {
+        debugPrint('[Reminder] launch details unavailable: $e');
+      }
 
       // Android 8+ drops a notification whose channel does not exist, with no
       // error anywhere. Create it before anything is scheduled.
@@ -145,119 +128,97 @@ class ReminderService {
   ///
   /// [lastActiveDate] is the `yyyy-MM-dd` string the progress document
   /// already stores.
+  /// [examId] and [examDaysLeft] come from the countdown card's own data and
+  /// are null when the student has set no date. When a paper is close, it
+  /// takes over the copy.
   Future<void> refresh({
     required int streak,
     required String lastActiveDate,
+    String? examId,
+    int? examDaysLeft,
     DateTime? now,
   }) async {
     if (!_ready) await init();
     if (!_ready) return;
 
     final at = now ?? DateTime.now();
-    final target = nextFireTime(
+    final plan = ReminderPlan.build(
       streak: streak,
       lastActiveDate: lastActiveDate,
       now: at,
+      examId: examId,
+      examDaysLeft: examDaysLeft,
     );
 
-    // Always clear first: this is what makes practising at 4pm cancel the 8pm
-    // reminder, and what keeps the one-a-day cap structural.
-    try {
-      await _plugin.cancel(id: _streakId);
-    } catch (e) {
-      debugPrint('[Reminder] cancel failed: $e');
-    }
+    // Always clear the whole ladder first. This is what makes practising at
+    // 4pm cancel tonight's reminder, and what keeps one-a-day structural: a
+    // rebuilt plan replaces every pending evening rather than adding to it.
+    await _cancelLadder();
 
-    if (target == null) return;
-
-    final line = lineFor(streak: streak, day: target.day);
-
-    try {
-      await _plugin.zonedSchedule(
-        id: _streakId,
-        title: line[0],
-        body: line[1],
-        scheduledDate: tz.TZDateTime.from(target, tz.local),
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            _channelId,
-            _channelName,
-            channelDescription: _channelDescription,
-            importance: Importance.defaultImportance,
-            priority: Priority.defaultPriority,
+    for (final item in plan) {
+      try {
+        await _plugin.zonedSchedule(
+          id: item.id,
+          title: item.title,
+          body: item.body,
+          // Read back when the tap launches the app, which is the only way to
+          // tell which kind of reminder actually earns an open.
+          payload: item.kind.name,
+          scheduledDate: tz.TZDateTime.from(item.at, tz.local),
+          notificationDetails: const NotificationDetails(
+            android: AndroidNotificationDetails(
+              _channelId,
+              _channelName,
+              channelDescription: _channelDescription,
+              importance: Importance.defaultImportance,
+              priority: Priority.defaultPriority,
+            ),
+            iOS: DarwinNotificationDetails(),
           ),
-          iOS: DarwinNotificationDetails(),
-        ),
-        // Inexact on purpose. Exact alarms need SCHEDULE_EXACT_ALARM on
-        // Android 14+, which Play scrutinises and which a study reminder
-        // cannot justify. A few minutes either side of 8pm is fine.
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      );
-      Analytics.instance.reminderScheduled(kind: 'streak', streak: streak);
-    } catch (e) {
-      debugPrint('[Reminder] schedule failed: $e');
+          // Inexact on purpose. Exact alarms need SCHEDULE_EXACT_ALARM on
+          // Android 14+, which Play scrutinises and which a study reminder
+          // cannot justify. A few minutes either side of 8pm is fine.
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+      } catch (e) {
+        debugPrint('[Reminder] schedule ${item.id} failed: $e');
+      }
     }
+
+    if (plan.isNotEmpty) {
+      // One event per rebuild, not one per evening armed, so the count stays
+      // readable. It still counts arming rather than delivery — a plan is
+      // replaced far more often than it fires — so this is not a denominator
+      // for the open rate.
+      Analytics.instance.reminderScheduled(
+        kind: plan.first.kind.name,
+        streak: streak,
+      );
+    }
+  }
+
+  /// Clears every evening in the ladder, plus the single id used before the
+  /// ladder existed so an upgrading device does not keep a stale reminder
+  /// pending alongside the new ones.
+  Future<void> _cancelLadder() async {
+    for (var i = 0; i < ReminderPlan.horizonDays; i++) {
+      try {
+        await _plugin.cancel(id: ReminderPlan.firstId + i);
+      } catch (e) {
+        debugPrint('[Reminder] cancel ${ReminderPlan.firstId + i} failed: $e');
+      }
+    }
+    try {
+      await _plugin.cancel(id: ReminderPlan.legacyId);
+    } catch (_) {}
   }
 
   Future<void> cancelAll() async {
     try {
-      await _plugin.cancel(id: _streakId);
+      await _cancelLadder();
     } catch (e) {
       debugPrint('[Reminder] cancelAll failed: $e');
     }
   }
 
-  // ── Pure logic, kept separate so it can be tested without a device ────────
-
-  /// When the next streak reminder should fire, or null for "do not nag".
-  ///
-  /// Null in three cases: the streak is too small to be worth protecting,
-  /// the streak is already broken so the notification would be a lie, or
-  /// there is simply nothing to say tonight.
-  @visibleForTesting
-  static DateTime? nextFireTime({
-    required int streak,
-    required String lastActiveDate,
-    required DateTime now,
-  }) {
-    if (streak < _minStreakToWarn) return null;
-
-    final today = _dateString(now);
-    final yesterday = _dateString(now.subtract(const Duration(days: 1)));
-
-    // Already broken: the last practice was before yesterday, so there is no
-    // streak left to save and claiming otherwise would be a lie.
-    if (lastActiveDate != today && lastActiveDate != yesterday) return null;
-
-    final slotToday = DateTime(now.year, now.month, now.day, _hour, _minute);
-
-    // Practised today: tonight needs no reminder, so aim at tomorrow.
-    if (lastActiveDate == today) {
-      return slotToday.add(const Duration(days: 1));
-    }
-
-    // Not practised today, and the evening slot is still ahead: tonight.
-    if (now.isBefore(slotToday)) return slotToday;
-
-    // Past 8pm with nothing done. Firing now would mean a notification at
-    // 11pm; the streak survives until midnight anyway, so leave tonight alone
-    // and arm tomorrow.
-    return slotToday.add(const Duration(days: 1));
-  }
-
-  /// Picks a line, rotating by day so consecutive misses read differently.
-  /// Returns `[title, body]`.
-  @visibleForTesting
-  static List<String> lineFor({required int streak, required int day}) {
-    final line = _lines[day % _lines.length];
-    return [
-      line[0].replaceAll('{n}', '$streak'),
-      line[1].replaceAll('{n}', '$streak'),
-    ];
-  }
-
-  static String _dateString(DateTime d) =>
-      '${d.year.toString().padLeft(4, '0')}-'
-      '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
 }

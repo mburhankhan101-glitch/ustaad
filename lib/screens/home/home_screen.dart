@@ -607,18 +607,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         );
         final int streak = streakNow.streak;
 
-        // Re-arm tonight's streak reminder whenever either value moves.
-        // This is also what cancels it: finishing a quiz updates
-        // lastActiveDate to today, and ReminderService.refresh() then clears
-        // the pending notification instead of scheduling a new one.
-        final reminderKey = '$streak|$lastActiveDate';
-        if (_reminderKey != reminderKey) {
-          _reminderKey = reminderKey;
-          ReminderService.instance.refresh(
-            streak: streak,
-            lastActiveDate: lastActiveDate,
-          );
-        }
         final int solvedToday = progressData?['solvedToday'] as int? ?? 0;
         final double accuracy =
             (progressData?['accuracy'] as num?)?.toDouble() ?? 0.0;
@@ -666,6 +654,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) setState(() => _cachedSelectedTests = selectedTests);
           });
+        }
+        // Rebuild the ten-evening reminder ladder whenever anything it reads
+        // moves. This is also what cancels tonight's: finishing a quiz sets
+        // lastActiveDate to today, and the rebuilt plan simply omits this
+        // evening instead of scheduling one.
+        //
+        // The nearest exam is part of the key because the copy changes once a
+        // paper is inside a fortnight, and because the countdown ticking down
+        // a day has to re-word every evening already armed.
+        final examPlan = ref.watch(examPlanProvider).valueOrNull;
+        final nextExam = examPlan == null
+            ? null
+            : ExamCountdown.nearest(
+                dates: examPlan.dates,
+                selectedTests: selectedTests,
+                now: DateTime.now(),
+              );
+        final reminderKey =
+            '$streak|$lastActiveDate|${nextExam?.examId}|${nextExam?.daysLeft}';
+        if (_reminderKey != reminderKey) {
+          _reminderKey = reminderKey;
+          ReminderService.instance.refresh(
+            streak: streak,
+            lastActiveDate: lastActiveDate,
+            examId: nextExam?.examId,
+            examDaysLeft: nextExam?.daysLeft,
+          );
         }
 
         // ── A paper just sat ─────────────────────────────────────────────
