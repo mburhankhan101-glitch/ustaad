@@ -978,7 +978,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       bottom: false,
                       child: SingleChildScrollView(
                         physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.only(bottom: 96),
+                        // Clears the floating nav bar and then some: the grid used to
+                        // stop dead against it, which read as the page being cut off
+                        // rather than finished.
+                        padding: const EdgeInsets.only(bottom: 132),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [

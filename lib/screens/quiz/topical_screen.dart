@@ -61,10 +61,35 @@ class _TopicalScreenState extends ConsumerState<TopicalScreen> {
 
     return Scaffold(
       backgroundColor: UstaadColors.background1,
-      body: SafeArea(
+      body: Stack(
+        children: [
+          // The same gradient every other screen wears. A flat navy panel
+          // here made Topical look like a different app bolted on.
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    UstaadColors.background1,
+                    UstaadColors.background2,
+                    UstaadColors.background3,
+                  ],
+                  stops: [0.0, 0.55, 1.0],
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
         bottom: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
+          padding: EdgeInsets.fromLTRB(
+            20,
+            16,
+            20,
+            132 + MediaQuery.of(context).viewPadding.bottom,
+          ),
           children: [
             const Text(
               'Topical practice',
@@ -142,6 +167,8 @@ class _TopicalScreenState extends ConsumerState<TopicalScreen> {
             for (final s in tab.sections) _sectionRow(tab, s),
           ],
         ),
+          ),
+        ],
       ),
     );
   }

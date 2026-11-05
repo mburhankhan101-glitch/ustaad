@@ -184,7 +184,14 @@ class _TopicPracticeScreenState extends ConsumerState<TopicPracticeScreen> {
           final weak = _query.isEmpty ? _weakTopics() : const [];
 
           return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+            // Enough tail that the last chapter is not pinned to the bezel,
+            // plus whatever the system navigation bar takes.
+            padding: EdgeInsets.fromLTRB(
+              16,
+              4,
+              16,
+              48 + MediaQuery.of(context).viewPadding.bottom,
+            ),
             children: [
               _searchBox(cat.totalQuestions),
               if (weak.isNotEmpty) ...[

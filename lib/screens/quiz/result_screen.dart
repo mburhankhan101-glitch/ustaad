@@ -15,7 +15,6 @@ class _C {
   static const primary = Color(0xFF6C63FF);
   static const success = Color(0xFF4CAF50);
   static const error = Color(0xFFFF6B6B);
-  static const gold = Color(0xFFFFD700);
 }
 
 /// How well they did, as a share of what they attempted.
@@ -71,9 +70,11 @@ class _ResultScreenState extends State<ResultScreen>
     with TickerProviderStateMixin {
   late final int _correct;
   late final int _wrong;
-  late final int _skipped;
   late final int _total;
   late final int _accuracy;
+
+  /// Counts by default; percentages on tap.
+  bool _showPercent = false;
   late final int _tier;
   late final Color _ringColor;
 
@@ -84,7 +85,6 @@ class _ResultScreenState extends State<ResultScreen>
   late final Animation<double> _statsAnim;
   late final Animation<double> _breakdownAnim;
   late final Animation<double> _weakAnim;
-  late final Animation<double> _msgAnim;
   late final Animation<double> _btnsAnim;
 
   late final AnimationController _ringCtrl;
@@ -184,7 +184,7 @@ class _ResultScreenState extends State<ResultScreen>
   // ──────────────────────────────────────────────────────────────────────────
   void _computeScore() {
     final int rawTotal = widget.questions.length;
-    int correct = 0, wrong = 0, skipped = 0;
+    int correct = 0, wrong = 0;
     final Map<String, int> weakMap = {};
     int notAttempted = 0;
 
@@ -194,7 +194,8 @@ class _ResultScreenState extends State<ResultScreen>
         notAttempted++;
         continue;
       } else if (sel == null) {
-        skipped++;
+        notAttempted++;
+        continue;
       } else if (sel == widget.questions[i].correctIndex) {
         correct++;
       } else {
@@ -209,7 +210,6 @@ class _ResultScreenState extends State<ResultScreen>
     _total = rawTotal - notAttempted;
     _correct = correct;
     _wrong = wrong;
-    _skipped = skipped;
     _accuracy = _total > 0 ? ((_correct / _total) * 100).round() : 0;
     // Share of what they actually attempted, not a raw count. These were
     // _correct >= 8 and >= 5, which silently assumed every quiz is ten
@@ -276,7 +276,6 @@ class _ResultScreenState extends State<ResultScreen>
     _statsAnim = _s(0.15, 0.65);
     _breakdownAnim = _s(0.28, 0.78);
     _weakAnim = _s(0.38, 0.88);
-    _msgAnim = _s(0.48, 0.98);
     _btnsAnim = _s(0.55, 1.00);
 
     _ringCtrl = AnimationController(
@@ -327,33 +326,6 @@ class _ResultScreenState extends State<ResultScreen>
   String get _title =>
       const ['Needs More Practice', 'Good Effort!', 'Excellent Work!'][_tier];
 
-  String get _subtitle => const [
-    "Don't give up — every attempt makes you stronger.",
-    "You're improving. A bit more practice and you'll ace it.",
-    "You're in the top 20% for this section.",
-  ][_tier];
-
-  String get _ustuMsg {
-    final topTopic = _weakTopics.isNotEmpty ? _weakTopics.keys.first : null;
-
-    if (_tier == 2) {
-      return "Outstanding! $_correct/$_total — you've mastered this section. Try the next one!";
-    }
-    if (_tier == 1) {
-      if (topTopic != null) {
-        return "Solid work! You dropped points on \"$topTopic\" — review that one and you'll nail it next time.";
-      }
-      return "Solid work! You missed $_wrong question${_wrong > 1 ? 's' : ''}. A bit more practice and you'll ace it.";
-    }
-    if (topTopic != null) {
-      return "You got $_correct right. Biggest weak spot: \"$topTopic\". Ustu will remind you to practice it — don't skip it next time!";
-    }
-    return "You got $_correct right — that's a start! Review the concepts for the $_wrong wrong answers before retrying.";
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────────
-  // FIXED: All exit points now simply pop the screen, returning to HomeScreen.
-  // ─────────────────────────────────────────────────────────────────────────────
   void _goHome() {
     Navigator.of(context).pop();
   }
@@ -380,7 +352,9 @@ class _ResultScreenState extends State<ResultScreen>
               child: SafeArea(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.only(bottom: 32),
+                  padding: EdgeInsets.only(
+                    bottom: 32 + MediaQuery.of(context).viewPadding.bottom,
+                  ),
                   child: isWeb ? _buildWebContent() : _buildMobileContent(),
                 ),
               ),
@@ -398,16 +372,12 @@ class _ResultScreenState extends State<ResultScreen>
         const SizedBox(height: 24),
         _buildHero(),
         const SizedBox(height: 20),
-        _buildStatsRow(),
-        const SizedBox(height: 18),
-        _buildBreakdown(),
+        _buildScoreStrip(),
         if (_weakTopics.isNotEmpty) ...[
           const SizedBox(height: 18),
           _buildWeakTopicsSection(),
         ],
-        const SizedBox(height: 18),
-        _buildUstuMessage(),
-        const SizedBox(height: 20),
+        const SizedBox(height: 22),
         _buildButtons(),
       ],
     );
@@ -425,9 +395,7 @@ class _ResultScreenState extends State<ResultScreen>
               children: [
                 _buildHero(),
                 const SizedBox(height: 24),
-                _buildStatsRow(),
-                const SizedBox(height: 24),
-                _buildBreakdown(),
+                _buildScoreStrip(),
               ],
             ),
           ),
@@ -438,8 +406,6 @@ class _ResultScreenState extends State<ResultScreen>
               children: [
                 if (_weakTopics.isNotEmpty) _buildWeakTopicsSection(),
                 if (_weakTopics.isNotEmpty) const SizedBox(height: 24),
-                _buildUstuMessage(),
-                const SizedBox(height: 24),
                 _buildWebButtons(),
               ],
             ),
@@ -658,48 +624,7 @@ class _ResultScreenState extends State<ResultScreen>
               letterSpacing: -0.3,
             ),
           ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              _subtitle,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                color: Colors.white.withOpacity(0.5),
-                fontSize: 12,
-                height: 1.5,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildCompletionPill(),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCompletionPill() {
-    final pct = widget.poolSize > 0
-        ? ((_total / widget.poolSize) * 100).clamp(0, 100).round()
-        : 0;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
-      ),
-      child: Text(
-        '$pct% of section done',
-        style: TextStyle(
-          fontFamily: 'Poppins',
-          color: Colors.white.withOpacity(0.55),
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
-        ),
       ),
     );
   }
@@ -720,136 +645,142 @@ class _ResultScreenState extends State<ResultScreen>
     );
   }
 
-  Widget _buildStatsRow() {
+  /// One animated bar instead of four boxes and three more bars.
+  ///
+  /// The old screen showed the same three numbers twice: stat cards reading
+  /// Correct 2, Wrong 8, Accuracy 20%, then a breakdown repeating Correct 2
+  /// and Wrong 8 underneath. The ring above already says 2/10, which is the
+  /// same fact a third time.
+  ///
+  /// So this is the one thing those were all circling: the shape of the
+  /// attempt. A bar that fills to show how much of it went right, with the
+  /// counts tallying up alongside it. Tapping swaps counts for percentages,
+  /// because a student comparing attempts thinks in percentages while one
+  /// reviewing this attempt thinks in questions.
+  Widget _buildScoreStrip() {
     return _fadeUp(
       _statsAnim,
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 22),
-        child: Row(
-          children: [
-            _statCard(_correct.toString(), 'CORRECT', _C.success),
-            const SizedBox(width: 10),
-            _statCard(_wrong.toString(), 'WRONG', _C.error),
-            const SizedBox(width: 10),
-            _statCard(_skipped.toString(), 'SKIPPED', _C.gold),
-            const SizedBox(width: 10),
-            _statCard('$_accuracy%', 'ACCURACY', Colors.white),
-          ],
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setState(() => _showPercent = !_showPercent);
+          },
+          child: AnimatedBuilder(
+            animation: _breakdownAnim,
+            builder: (context, _) {
+              final t = Curves.easeOutCubic.transform(
+                _breakdownAnim.value.clamp(0.0, 1.0),
+              );
+              final shownCorrect = (_correct * t).round();
+              final shownWrong = (_wrong * t).round();
+              final correctShare = _total > 0 ? _correct / _total : 0.0;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // The bar. Correct grows from the left, wrong fills the
+                  // rest, so the split itself is the headline.
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      height: 14,
+                      child: Row(
+                        children: [
+                          if (_correct > 0)
+                            Expanded(
+                              flex: (correctShare * 1000 * t).round() + 1,
+                              child: Container(color: _C.success),
+                            ),
+                          if (_wrong > 0)
+                            Expanded(
+                              flex:
+                                  (((1 - correctShare) * 1000 * t).round() + 1),
+                              child: Container(color: _C.error),
+                            ),
+                          // The unfilled remainder while the bar animates in.
+                          if (t < 1)
+                            Expanded(
+                              flex: ((1 - t) * 1000).round() + 1,
+                              child: Container(
+                                color: Colors.white.withOpacity(0.07),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _tally(
+                        _C.success,
+                        'Right',
+                        _showPercent
+                            ? '${_total > 0 ? ((_correct / _total) * 100).round() : 0}%'
+                            : '$shownCorrect',
+                      ),
+                      const SizedBox(width: 22),
+                      _tally(
+                        _C.error,
+                        'Wrong',
+                        _showPercent
+                            ? '${_total > 0 ? ((_wrong / _total) * 100).round() : 0}%'
+                            : '$shownWrong',
+                      ),
+                      const Spacer(),
+                      Text(
+                        _showPercent ? 'tap for counts' : 'tap for %',
+                        style: TextStyle(
+                          fontFamily: 'Poppins',
+                          color: Colors.white.withOpacity(0.28),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
 
-  Widget _statCard(String number, String label, Color numColor) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
-        ),
-        child: Column(
-          children: [
-            Text(
-              number,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                color: numColor,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                color: Colors.white.withOpacity(0.45),
-                fontSize: 8,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBreakdown() {
-    return _fadeUp(
-      _breakdownAnim,
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'PERFORMANCE BREAKDOWN',
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                color: Colors.white.withOpacity(0.4),
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-              ),
-            ),
-            const SizedBox(height: 12),
-            _barRow('✅', 'Correct', _correct, _C.success),
-            const SizedBox(height: 10),
-            _barRow('❌', 'Wrong', _wrong, _C.error),
-            const SizedBox(height: 10),
-            _barRow('⏭', 'Skipped', _skipped, _C.gold),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _barRow(String icon, String label, int value, Color color) {
-    final pct = _total > 0 ? value / _total : 0.0;
+  Widget _tally(Color color, String label, String value) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(icon, style: const TextStyle(fontSize: 14)),
-        const SizedBox(width: 10),
-        SizedBox(
-          width: 54,
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          value,
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            color: color,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            height: 1,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Padding(
+          padding: const EdgeInsets.only(top: 3),
           child: Text(
             label,
             style: TextStyle(
               fontFamily: 'Poppins',
-              color: Colors.white.withOpacity(0.65),
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: AnimatedBuilder(
-              animation: _breakdownAnim,
-              builder: (_, __) => LinearProgressIndicator(
-                value: pct * _breakdownAnim.value,
-                minHeight: 8,
-                backgroundColor: Colors.white.withOpacity(0.08),
-                valueColor: AlwaysStoppedAnimation<Color>(color),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        SizedBox(
-          width: 20,
-          child: Text(
-            value.toString(),
-            textAlign: TextAlign.right,
-            style: TextStyle(
-              fontFamily: 'Poppins',
               color: Colors.white.withOpacity(0.5),
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -959,56 +890,6 @@ class _ResultScreenState extends State<ResultScreen>
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildUstuMessage() {
-    return _fadeUp(
-      _msgAnim,
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: _C.primary.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: _C.primary.withOpacity(0.3)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('🦉', style: TextStyle(fontSize: 24)),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Ustu says',
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _ustuMsg,
-                      style: const TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Color(0xFFC8C4FF),
-                        fontSize: 12,
-                        height: 1.6,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
