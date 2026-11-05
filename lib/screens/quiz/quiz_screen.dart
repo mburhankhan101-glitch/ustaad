@@ -32,6 +32,10 @@ class QuizScreen extends ConsumerStatefulWidget {
   final String section;
   final int initialIndex;
   final String? topic;
+
+  /// A printed syllabus chapter, from the topic picker. Wider than a topic:
+  /// 'Electrostatics' is 157 questions where its topics are a few dozen each.
+  final String? chapter;
   final int limit;
   final bool isWeakTopicPractice;
 
@@ -46,6 +50,7 @@ class QuizScreen extends ConsumerStatefulWidget {
     required this.section,
     this.initialIndex = 0,
     this.topic,
+    this.chapter,
     this.limit = 10,
     this.isWeakTopicPractice = false,
     this.isResumingSession = false, // ← default: new session, check credits
@@ -192,6 +197,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen>
         uid: FirebaseAuth.instance.currentUser?.uid ?? '',
         limit: widget.limit,
         topic: widget.topic,
+        chapter: widget.chapter,
       );
     } catch (_) {
       if (!mounted) return;

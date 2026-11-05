@@ -192,6 +192,33 @@ class Analytics {
   /// How a paper went, and whether the student wrote anything beyond tapping
   /// a mood. The note rate is the honest measure of whether the check-in
   /// reads as someone asking or as a form to dismiss.
+  // ── Practising by chapter ─────────────────────────────────────────────────
+
+  /// Whether anyone opens the picker at all, and whether they then start
+  /// something. A picker that is opened and backed out of is a different
+  /// problem from one nobody opens.
+  Future<void> topicPickerOpened({
+    required String exam,
+    required String section,
+  }) =>
+      _log('topic_picker_opened', {'exam': exam, 'section': section});
+
+  Future<void> topicPracticeStarted({
+    required String exam,
+    required String section,
+    required String chapter,
+    required String topic,
+    required int available,
+  }) =>
+      _log('topic_practice_started', {
+        'exam': exam,
+        'section': section,
+        'chapter': chapter,
+        'topic': topic,
+        'available': available,
+        'grain': chapter.isNotEmpty ? 'chapter' : 'topic',
+      });
+
   // ── Quizzes left unfinished ───────────────────────────────────────────────
 
   /// Where a student gave up. 323 quizzes were started in a month and 138

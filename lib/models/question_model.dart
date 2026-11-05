@@ -13,6 +13,11 @@ class Question {
   final List<String>
   exams; // full tag list, e.g. ["NUST-NET", "MDCAT"] — kept for pooled sections
   final String topic;
+
+  /// The printed syllabus chapter this question belongs to, e.g. 'Nuclear
+  /// Physics'. Empty for the sections with no printed syllabus, and for the
+  /// handful whose topic label was too vague to place.
+  final String chapter;
   final int year;
   final String difficulty;
   final String explanationEn;
@@ -27,6 +32,10 @@ class Question {
     required this.exam,
     required this.exams,
     required this.topic,
+    // Defaulted rather than required: three sections have no printed syllabus
+    // and never carry one, and every test that builds a Question by hand
+    // predates the field.
+    this.chapter = '',
     required this.year,
     required this.difficulty,
     required this.explanationEn,
@@ -61,6 +70,7 @@ class Question {
 
       // ── Optional fields ──
       topic: data['topic']?.toString() ?? 'General',
+      chapter: data['chapter']?.toString() ?? '',
       year: (data['year'] as num?)?.toInt() ?? 2024,
       difficulty: data['difficulty']?.toString() ?? 'medium',
       explanationEn: data['explanation_en']?.toString() ?? '',

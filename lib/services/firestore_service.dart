@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ustaad/models/question_model.dart';
+import 'package:ustaad/models/topic_catalogue.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // FirestoreService — Ustaad
@@ -105,6 +106,7 @@ class FirestoreService {
     String? uid,
     Set<String> sessionExcludeIds = const {},
     String? topic, // ← new
+    String? chapter,
   }) async {
     final key = _sectionKey(exam, section);
 
@@ -120,20 +122,22 @@ class FirestoreService {
         );
       }
 
-      // ── Topic‑filtered branch ──────────────────────────────────────────
-      if (topic != null && topic.isNotEmpty) {
+      // ── Topic- or chapter-filtered branch ──────────────────────────────
+      final byChapter = chapter != null && chapter.isNotEmpty;
+      if (byChapter || (topic != null && topic.isNotEmpty)) {
         final pool = _pool[key];
         if (pool == null || pool.isEmpty) return [];
 
         // Explained first here too, and it matters most here: a weak topic
         // drill is precisely the moment a student needs to be told why they
         // keep getting something wrong.
+        final want = (byChapter ? chapter : topic)!.trim().toLowerCase();
         final filtered =
             pool
                 .where(
                   (q) =>
-                      q.topic.trim().toLowerCase() ==
-                      topic.trim().toLowerCase(),
+                      (byChapter ? q.chapter : q.topic).trim().toLowerCase() ==
+                      want,
                 )
                 .toList()
               ..shuffle()
@@ -145,7 +149,8 @@ class FirestoreService {
 
         final count = filtered.length < limit ? filtered.length : limit;
         print(
-          '🎯 USTAAD: Topic-filtered practice → “$topic” → $count questions',
+          '🎯 USTAAD: ${byChapter ? "Chapter" : "Topic"}-filtered practice → '
+          '“${byChapter ? chapter : topic}” → $count questions',
         );
         return filtered.take(count).toList();
       }
@@ -167,6 +172,41 @@ class FirestoreService {
     } catch (e) {
       print('🔴 USTAAD Error in fetchQuestions: $e');
       return [];
+    }
+  }
+
+  /// What the topic picker shows for one section.
+  ///
+  /// Reads the same in-memory pool a quiz runs from, so opening the picker
+  /// costs nothing once a section has been played. On a cold open it builds
+  /// the pool, which is the read a quiz would have paid for anyway.
+  ///
+  /// The pool holds the whole section — unseen first, then seen — so these
+  /// counts are the real totals and do not shrink as a student works through
+  /// a chapter. A count that fell as you practised would read as questions
+  /// going missing.
+  Future<TopicCatalogue> topicCatalogue({
+    required String exam,
+    required String section,
+    String? additionalSection,
+    String? uid,
+  }) async {
+    final key = _sectionKey(exam, section);
+    try {
+      if (!_pool.containsKey(key)) {
+        await _buildPool(
+          exam: exam,
+          section: section,
+          additionalSection: additionalSection,
+          uid: uid,
+          key: key,
+        );
+      }
+      final pool = _pool[key] ?? const <Question>[];
+      return TopicCatalogue.fromQuestions(pool, section);
+    } catch (e) {
+      print('🔴 USTAAD: topicCatalogue failed for $key: $e');
+      return const TopicCatalogue(chapters: [], totalQuestions: 0);
     }
   }
 

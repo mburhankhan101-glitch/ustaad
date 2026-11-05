@@ -8,6 +8,7 @@ import 'package:ustaad/core/notifications/push_service.dart';
 import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/papers/paper_selection_screen.dart';
 import 'package:ustaad/screens/quiz/quiz_screen.dart';
+import 'package:ustaad/screens/quiz/topic_practice_screen.dart';
 import 'package:ustaad/screens/profile/profile_screen.dart';
 import 'package:ustaad/providers/progress_provider.dart';
 import 'package:ustaad/providers/auth_provider.dart';
@@ -416,6 +417,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final parts = name.trim().split(' ');
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return '${parts[0][0]}${parts[parts.length - 1][0]}'.toUpperCase();
+  }
+
+  /// Opens the chapter picker for one section.
+  void _openTopicPractice(String exam, String section) {
+    HapticFeedback.selectionClick();
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, animation, __) =>
+            TopicPracticeScreen(exam: exam, section: section),
+        transitionsBuilder: (_, animation, __, child) => SlideTransition(
+          position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+              .animate(
+                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              ),
+          child: child,
+        ),
+      ),
+    );
   }
 
   void _openQuiz(
@@ -2151,6 +2171,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ],
               ),
+              // Practise one chapter instead of a mixed quiz. A second,
+              // smaller action rather than a choice on tap: starting a quiz
+              // is what this card is for, and putting a menu in front of it
+              // would tax the common case to serve the rarer one.
+              if (!s.comingSoon)
+                Positioned(
+                  bottom: -6,
+                  right: -6,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _openTopicPractice(searchExam, s.dbSection),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(
+                        Icons.menu_book_rounded,
+                        size: 17,
+                        color: Colors.white.withOpacity(0.38),
+                      ),
+                    ),
+                  ),
+                ),
               if (s.comingSoon || notStarted)
                 Positioned(
                   top: 0,
