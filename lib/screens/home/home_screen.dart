@@ -8,7 +8,7 @@ import 'package:ustaad/core/notifications/push_service.dart';
 import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/papers/paper_selection_screen.dart';
 import 'package:ustaad/screens/quiz/quiz_screen.dart';
-import 'package:ustaad/screens/quiz/topic_practice_screen.dart';
+import 'package:ustaad/screens/quiz/topical_screen.dart';
 import 'package:ustaad/screens/profile/profile_screen.dart';
 import 'package:ustaad/providers/progress_provider.dart';
 import 'package:ustaad/providers/auth_provider.dart';
@@ -232,13 +232,22 @@ class ExamTab {
   });
 }
 
-const _examTabs = [
+const kExamTabs = [
   ExamTab(id: 'FAST-NU', label: 'FAST-NU', sections: _fastNuSections),
   ExamTab(id: 'NUST-NET', label: 'NUST-NET', sections: _nustNetSections),
   ExamTab(id: 'NAT-NTS', label: 'NTS', sections: _ntsSections),
   ExamTab(id: 'MDCAT', label: 'MDCAT', sections: _mdcatSections),
   ExamTab(id: 'NUMS', label: 'NUMS', sections: _numsSections),
 ];
+
+/// The exams this student picked, or all of them if the selection is missing.
+/// Shared with TopicalScreen so there is one list of exams and sections, not
+/// two that can drift apart.
+List<ExamTab> visibleExamTabs(List<String> selectedTests) {
+  if (selectedTests.isEmpty) return kExamTabs;
+  final matched = kExamTabs.where((t) => selectedTests.contains(t.id)).toList();
+  return matched.isEmpty ? kExamTabs : matched;
+}
 
 class _NavItem {
   final IconData icon;
@@ -248,7 +257,7 @@ class _NavItem {
 
 const _navItems = [
   _NavItem(icon: Icons.home_rounded, label: 'Home'),
-  _NavItem(icon: Icons.quiz_rounded, label: 'Quiz'),
+  _NavItem(icon: Icons.menu_book_rounded, label: 'Topical'),
   _NavItem(icon: Icons.description_rounded, label: 'Papers'),
   _NavItem(icon: Icons.person_rounded, label: 'Profile'),
 ];
@@ -367,7 +376,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   late final List<Widget> _screens = [
     const SizedBox.shrink(),
-    const SizedBox.shrink(),
+    const TopicalScreen(),
     const PaperSelectionScreen(),
     const ProfileScreen(),
   ];
@@ -417,25 +426,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final parts = name.trim().split(' ');
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return '${parts[0][0]}${parts[parts.length - 1][0]}'.toUpperCase();
-  }
-
-  /// Opens the chapter picker for one section.
-  void _openTopicPractice(String exam, String section) {
-    HapticFeedback.selectionClick();
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (_, animation, __) =>
-            TopicPracticeScreen(exam: exam, section: section),
-        transitionsBuilder: (_, animation, __, child) => SlideTransition(
-          position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-              .animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-          child: child,
-        ),
-      ),
-    );
   }
 
   void _openQuiz(
@@ -1141,10 +1131,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               onTap: () => setState(() => _selectedNav = 0),
             ),
             _buildSidebarNavItem(
-              icon: Icons.quiz_rounded,
-              label: 'Practice Quiz',
+              icon: Icons.menu_book_rounded,
+              label: 'Topical',
               index: 1,
-              onTap: _showQuizPicker,
+              onTap: () => setState(() => _selectedNav = 1),
             ),
             _buildSidebarNavItem(
               icon: Icons.description_rounded,
@@ -1978,13 +1968,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Falls back to every tab when the filter leaves nothing, which happens
   /// if selectedTests names an exam we no longer ship. Showing all of them
   /// is wrong but harmless; an empty list makes clamp(0, -1) throw.
-  List<ExamTab> _visibleTabs(List<String> selectedTests) {
-    if (selectedTests.isEmpty) return _examTabs;
-    final matched = _examTabs
-        .where((t) => selectedTests.contains(t.id))
-        .toList();
-    return matched.isEmpty ? _examTabs : matched;
-  }
+  List<ExamTab> _visibleTabs(List<String> selectedTests) =>
+      visibleExamTabs(selectedTests);
 
   Widget _buildQuizSection(
     Map<String, dynamic> sectionMap,
@@ -2171,27 +2156,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ],
               ),
-              // Practise one chapter instead of a mixed quiz. A second,
-              // smaller action rather than a choice on tap: starting a quiz
-              // is what this card is for, and putting a menu in front of it
-              // would tax the common case to serve the rarer one.
-              if (!s.comingSoon)
-                Positioned(
-                  bottom: -6,
-                  right: -6,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _openTopicPractice(searchExam, s.dbSection),
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: Icon(
-                        Icons.menu_book_rounded,
-                        size: 17,
-                        color: Colors.white.withOpacity(0.38),
-                      ),
-                    ),
-                  ),
-                ),
               if (s.comingSoon || notStarted)
                 Positioned(
                   top: 0,
@@ -2276,11 +2240,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           return GestureDetector(
             onTap: () {
               HapticService.prominent();
-              if (i == 1) {
-                _showQuizPicker();
-              } else {
-                setState(() => _selectedNav = i);
-              }
+              // Every tab is a page now. Topical used to open a sheet over
+              // home from here, which is why it never felt like a place you
+              // could be.
+              setState(() => _selectedNav = i);
             },
             behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
