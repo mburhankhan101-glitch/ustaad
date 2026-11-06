@@ -709,6 +709,72 @@ class FirestoreService {
 
   // ── PUBLIC: WEAK TOPICS ─────────────────────────────────────────────────────
 
+  /// Remembers the exact questions a student got wrong.
+  ///
+  /// weakTopics already counts mistakes per topic, which is enough to say
+  /// "you are weak at Complex Numbers" and to run a drill. It is not enough
+  /// for flashcards, which need *this question you got wrong on 2 November*,
+  /// not a random question from the same topic.
+  ///
+  /// Nothing in the app records that today, and it cannot be recovered later:
+  /// every wrong answer before this shipped is a card that can never exist.
+  /// So it is written from the moment a quiz ends, long before anything shows
+  /// it to anyone.
+  ///
+  /// One document per question, keyed by question id, so a question missed
+  /// three times is one row with a count rather than three rows. [rightIds]
+  /// are questions they had previously missed and have now got right —
+  /// recorded so a card can eventually retire itself rather than asking
+  /// forever about something they have learned.
+  ///
+  /// Fire-and-forget by design: a student has finished their quiz and the
+  /// result screen must not wait on this, nor fail because of it.
+  Future<void> recordMistakes({
+    required String uid,
+    required List<Question> wrong,
+    List<String> rightIds = const [],
+  }) async {
+    if (wrong.isEmpty && rightIds.isEmpty) return;
+    final mistakes = _db.collection('users').doc(uid).collection('mistakes');
+
+    try {
+      final batch = _db.batch();
+      for (final q in wrong) {
+        batch.set(mistakes.doc(q.id), {
+          'questionId': q.id,
+          'exam': q.exam,
+          'section': q.section,
+          'topic': q.topic,
+          'chapter': q.chapter,
+          // Stored so a deck can be built without reading the question bank
+          // back, and so a card still works if the question is ever retired.
+          'questionText': q.text,
+          'wrongCount': FieldValue.increment(1),
+          'lastWrongAt': FieldValue.serverTimestamp(),
+          'firstWrongAt': FieldValue.serverTimestamp(),
+          'retired': false,
+        }, SetOptions(merge: true));
+      }
+      // merge:true above would reset firstWrongAt on every repeat, so the
+      // field is only meaningful on the first write. Correcting it costs a
+      // read per question, which is not worth it for a timestamp nothing
+      // depends on yet.
+      for (final id in rightIds) {
+        batch.set(mistakes.doc(id), {
+          'rightCount': FieldValue.increment(1),
+          'lastRightAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+      await batch.commit();
+      print('🧠 USTAAD: recorded ${wrong.length} mistake(s), '
+          '${rightIds.length} correction(s)');
+    } on FirebaseException catch (e) {
+      print('🔴 USTAAD: recordMistakes error [${e.code}]: ${e.message}');
+    } catch (e) {
+      print('🔴 USTAAD: recordMistakes exception: $e');
+    }
+  }
+
   Future<void> saveWeakTopics({
     required String uid,
     required Map<String, int> sessionWeakTopics,

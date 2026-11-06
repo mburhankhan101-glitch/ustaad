@@ -278,6 +278,26 @@ class _ResultScreenState extends State<ResultScreen>
       );
     }
 
+    // Which questions, not just which topics. Written on every session,
+    // weak-topic drills included, because getting a drilled question right
+    // is exactly the signal that should eventually retire its flashcard.
+    final wrongQs = <Question>[];
+    final rightIds = <String>[];
+    for (var i = 0; i < widget.questions.length; i++) {
+      final sel = widget.selectedAnswers[i];
+      if (sel == null || sel == -2) continue; // unreached, or an older sitting
+      if (sel == widget.questions[i].correctIndex) {
+        rightIds.add(widget.questions[i].id);
+      } else {
+        wrongQs.add(widget.questions[i]);
+      }
+    }
+    await FirestoreService().recordMistakes(
+      uid: user.uid,
+      wrong: wrongQs,
+      rightIds: rightIds,
+    );
+
     await streak;
   }
 
