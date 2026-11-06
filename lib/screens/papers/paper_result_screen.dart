@@ -14,6 +14,9 @@ class PaperResultScreen extends StatefulWidget {
 }
 
 class _PaperResultScreenState extends State<PaperResultScreen> {
+  /// Counts by default, percentages on tap — the same gesture as the
+  /// quiz result screen, so the two behave alike.
+  bool _showPercent = false;
   @override
   void initState() {
     super.initState();
@@ -249,10 +252,25 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
     );
   }
 
+  /// The score, in the same language the quiz result screen now speaks.
+  ///
+  /// That screen used to show the same figures four times over — a ring,
+  /// stat cards and a duplicate bar breakdown — and was cut back to one
+  /// animated strip. A paper ending in a different visual language than a
+  /// quiz makes the app feel like two apps, so this follows it: the number,
+  /// then one bar carrying the whole shape of the attempt.
+  ///
+  /// Skipped is real here, unlike on a quiz. A paper can be submitted with
+  /// questions left blank, and on a negatively marked paper leaving one
+  /// blank is often the right call — so it gets its own segment rather than
+  /// being folded into wrong.
   Widget _buildScoreCard() {
+    final r = widget.result;
+    final total = r.totalCorrect + r.totalWrong + r.totalSkipped;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.05),
         border: Border.all(color: Colors.white.withOpacity(0.1)),
@@ -269,75 +287,163 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            _hasNegative
-                ? widget.result.netScore.toStringAsFixed(2)
-                : widget.result.totalCorrect.toString(),
-            style: TextStyle(
-              color: _accentColor,
-              fontSize: 52,
-              fontWeight: FontWeight.w700,
-              fontFamily: 'Poppins',
-              height: 1,
-            ),
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 900),
+            curve: Curves.easeOutCubic,
+            builder: (context, t, _) {
+              final shown = _hasNegative
+                  ? (r.netScore * t).toStringAsFixed(2)
+                  : (r.totalCorrect * t).round().toString();
+              return Text(
+                shown,
+                style: TextStyle(
+                  color: _accentColor,
+                  fontSize: 52,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'Poppins',
+                  height: 1,
+                ),
+              );
+            },
           ),
           Text(
-            'out of ${_maxMarks.toStringAsFixed(0)}',
+            'out of ' + _maxMarks.toStringAsFixed(0),
             style: TextStyle(
               color: Colors.white.withOpacity(0.3),
               fontSize: 12,
               fontFamily: 'Poppins',
             ),
           ),
-          const SizedBox(height: 16),
-          const Divider(color: Colors.white12),
-          const SizedBox(height: 12),
-          // Stats row
-          if (_hasNegative)
-            _StatsRow(
-              items: [
-                _StatItem(
-                  label: 'Marks earned',
-                  value: widget.result.totalEarned.toStringAsFixed(2),
-                  color: const Color(0xFF4CAF50),
-                ),
-                _StatItem(
-                  label: 'Negative marks',
-                  value: widget.result.totalPenalty.toStringAsFixed(2),
-                  color: const Color(0xFFFF6B6B),
-                ),
-                _StatItem(
-                  label: 'Accuracy',
-                  value: '${widget.result.accuracyPercent.toStringAsFixed(1)}%',
-                  color: const Color(0xFFFFD700),
-                ),
-              ],
-            )
-          else
-            _StatsRow(
-              items: [
-                _StatItem(
-                  label: 'Correct',
-                  value: '${widget.result.totalCorrect}',
-                  color: const Color(0xFF4CAF50),
-                ),
-                _StatItem(
-                  label: 'Wrong / Skipped',
-                  value:
-                      '${widget.result.totalWrong + widget.result.totalSkipped}',
-                  color: const Color(0xFFFFD700),
-                ),
-                _StatItem(
-                  label: 'Accuracy',
-                  value: '${widget.result.accuracyPercent.toStringAsFixed(1)}%',
-                  color: Colors.white,
-                ),
-              ],
+          const SizedBox(height: 20),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _showPercent = !_showPercent),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 950),
+              curve: Curves.easeOutCubic,
+              builder: (context, t, _) {
+                int flex(int n) =>
+                    ((total > 0 ? n / total : 0.0) * 1000 * t).round() + 1;
+                String show(int n) {
+                  if (_showPercent) {
+                    final pct = total > 0 ? ((n / total) * 100).round() : 0;
+                    return pct.toString() + '%';
+                  }
+                  return (n * t).round().toString();
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        height: 14,
+                        child: Row(
+                          children: [
+                            if (r.totalCorrect > 0)
+                              Expanded(
+                                flex: flex(r.totalCorrect),
+                                child:
+                                    Container(color: const Color(0xFF4CAF50)),
+                              ),
+                            if (r.totalWrong > 0)
+                              Expanded(
+                                flex: flex(r.totalWrong),
+                                child:
+                                    Container(color: const Color(0xFFFF6B6B)),
+                              ),
+                            if (r.totalSkipped > 0)
+                              Expanded(
+                                flex: flex(r.totalSkipped),
+                                child: Container(
+                                  color: Colors.white.withOpacity(0.22),
+                                ),
+                              ),
+                            if (t < 1)
+                              Expanded(
+                                flex: ((1 - t) * 1000).round() + 1,
+                                child: Container(
+                                  color: Colors.white.withOpacity(0.07),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 18,
+                      runSpacing: 10,
+                      children: [
+                        _tally(const Color(0xFF4CAF50), 'Right',
+                            show(r.totalCorrect)),
+                        _tally(const Color(0xFFFF6B6B), 'Wrong',
+                            show(r.totalWrong)),
+                        if (r.totalSkipped > 0)
+                          _tally(Colors.white.withOpacity(0.35), 'Left',
+                              show(r.totalSkipped)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      _showPercent ? 'tap for counts' : 'tap for %',
+                      style: TextStyle(
+                        fontFamily: 'Poppins',
+                        color: Colors.white.withOpacity(0.28),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
+          ),
         ],
       ),
     );
   }
+
+  Widget _tally(Color color, String label, String value) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 7),
+        Text(
+          value,
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            color: color,
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+            height: 1,
+          ),
+        ),
+        const SizedBox(width: 5),
+        Padding(
+          padding: const EdgeInsets.only(top: 3),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              color: Colors.white.withOpacity(0.5),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
 
   Widget _buildSectionBreakdown() {
     return Container(
@@ -477,60 +583,3 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
 }
 
 // ─── Reusable stat widgets (unchanged) ─────────────────────────────────
-
-class _StatItem {
-  final String label;
-  final String value;
-  final Color color;
-  const _StatItem({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-}
-
-class _StatsRow extends StatelessWidget {
-  final List<_StatItem> items;
-  const _StatsRow({required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: [
-        for (int i = 0; i < items.length; i++) ...[
-          if (i > 0)
-            Container(
-              width: 1,
-              height: 28,
-              color: Colors.white.withOpacity(0.1),
-            ),
-          Expanded(
-            child: Column(
-              children: [
-                Text(
-                  items[i].value,
-                  style: TextStyle(
-                    color: items[i].color,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'Poppins',
-                  ),
-                ),
-                Text(
-                  items[i].label,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.35),
-                    fontSize: 9,
-                    fontFamily: 'Poppins',
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}

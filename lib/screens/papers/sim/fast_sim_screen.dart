@@ -103,12 +103,7 @@ class FastSimScreen extends ConsumerWidget {
             _header(context),
             Expanded(
               child: SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  12,
-                  12,
-                  12,
-                  24 + MediaQuery.of(context).viewPadding.bottom,
-                ),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -116,6 +111,16 @@ class FastSimScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+            ),
+            Container(
+              color: Colors.white,
+              padding: EdgeInsets.fromLTRB(
+                12,
+                12,
+                12,
+                12 + MediaQuery.of(context).viewPadding.bottom,
+              ),
+              child: _controls(context, notifier, selected),
             ),
           ],
         ),
@@ -194,8 +199,9 @@ class FastSimScreen extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 7, 14, 0),
+            padding: const EdgeInsets.fromLTRB(14, 9, 14, 0),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
                   'Time Left: $_clock',
@@ -312,12 +318,9 @@ class FastSimScreen extends ConsumerWidget {
           const SizedBox(height: 8),
           for (var i = 0; i < q.options.length; i++)
             _option(i, q.options[i], selected == i, notifier),
-          const SizedBox(height: 14),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFE5E8EC)),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: _controls(context, notifier, selected),
-          ),
+          // Air under the last option. Without it the final answer sat
+          // flush against the card edge and read as cut off.
+          const SizedBox(height: 18),
         ],
       ),
     );
@@ -366,6 +369,64 @@ class FastSimScreen extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Moving on, with a warning, because on FAST it is final.
+  ///
+  /// switchToSection deliberately refuses for FAST — the provider already
+  /// encodes the real rule, that sections run one way and a finished section
+  /// cannot be reopened. That refusal is why the button did nothing: it was
+  /// calling the free-navigation method NET uses. advanceToNextSection is
+  /// the one-way move, and a student is told what it costs before it happens.
+  void _confirmNextSection(
+    BuildContext context,
+    PaperSessionNotifier notifier,
+  ) {
+    final left = session.currentSection.questions
+        .where((q) => session.answers[q.id]?.selectedIndex == null)
+        .length;
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text(
+          'Move to the next section?',
+          style: TextStyle(
+            color: FastSim.ink,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          left == 0
+              ? 'You cannot come back to this section afterwards, exactly as '
+                  'in the real test.'
+              : '\$left question(s) in this section are still unanswered, and '
+                  'you cannot come back to them afterwards — exactly as in '
+                  'the real test.',
+          style: const TextStyle(color: Color(0xFF4A5568), fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Stay here'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              notifier.advanceToNextSection();
+            },
+            child: const Text(
+              'Move on',
+              style: TextStyle(
+                color: Color(0xFFC53030),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -429,8 +490,7 @@ class FastSimScreen extends ConsumerWidget {
                 textColor: Colors.white,
                 onTap: session.currentSectionIndex <
                         session.sections.length - 1
-                    ? () => notifier
-                        .switchToSection(session.currentSectionIndex + 1)
+                    ? () => _confirmNextSection(context, notifier)
                     : null,
               ),
             ),
