@@ -208,27 +208,52 @@ void main() {
   group('pendingDebrief decides when to ask how it went', () {
     final now = DateTime(2026, 11, 10, 9, 0);
 
-    test('asks the day after, not on the day itself', () {
-      // The paper may be in the afternoon. Asking how it went while they are
-      // still sitting it would be worse than not asking at all.
+    test('stays quiet on the morning of the paper', () {
+      // Entry tests here are morning sittings. "How did it go?" at nine a.m.
+      // is the worst possible thing to show someone about to walk into one.
       expect(
         ExamCountdown.pendingDebrief(
           dates: {'MDCAT': DateTime(2026, 11, 10)},
           debriefed: const {},
           selectedTests: const ['MDCAT'],
-          now: now,
+          now: DateTime(2026, 11, 10, 9, 0),
         ),
         isNull,
       );
+    });
 
-      final next = ExamCountdown.pendingDebrief(
+    test('asks on the evening of the paper', () {
+      // This is the moment someone actually wants to say how it went; by the
+      // next afternoon it has passed.
+      final prompt = ExamCountdown.pendingDebrief(
+        dates: {'MDCAT': DateTime(2026, 11, 10)},
+        debriefed: const {},
+        selectedTests: const ['MDCAT'],
+        now: DateTime(2026, 11, 10, 19, 30),
+      );
+      expect(prompt!.examId, 'MDCAT');
+      expect(prompt.daysAgo, 0);
+    });
+
+    test('the evening boundary is where the constant says', () {
+      ExamDebriefPrompt? at(int hour) => ExamCountdown.pendingDebrief(
+            dates: {'MDCAT': DateTime(2026, 11, 10)},
+            debriefed: const {},
+            selectedTests: const ['MDCAT'],
+            now: DateTime(2026, 11, 10, hour, 0),
+          );
+      expect(at(ExamCountdown.debriefFromHour - 1), isNull);
+      expect(at(ExamCountdown.debriefFromHour), isNotNull);
+    });
+
+    test('asks at any hour from the following day', () {
+      final prompt = ExamCountdown.pendingDebrief(
         dates: {'MDCAT': DateTime(2026, 11, 9)},
         debriefed: const {},
         selectedTests: const ['MDCAT'],
-        now: now,
+        now: DateTime(2026, 11, 10, 7, 0),
       );
-      expect(next!.examId, 'MDCAT');
-      expect(next.daysAgo, 1);
+      expect(prompt!.daysAgo, 1);
     });
 
     test('does not ask about a paper still ahead', () {

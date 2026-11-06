@@ -65,9 +65,8 @@ class ExamDebriefPrompt {
   /// Local midnight on the day of the paper.
   final DateTime date;
 
-  /// Calendar days since. Always 1 or more: the paper may still be ahead of
-  /// them on the day itself, so asking "how did it go" is only honest from
-  /// the following day.
+  /// Calendar days since. 0 on the evening of the paper itself, 1 the next
+  /// day, and so on.
   final int daysAgo;
 
   @override
@@ -194,9 +193,18 @@ class ExamCountdown {
     return '${examId}_$d';
   }
 
+  /// From this hour on the day of the paper, it is safe to assume it has been
+  /// sat. Entry tests here are morning or early-afternoon sittings, so by
+  /// early evening the student is out and the question is the right one.
+  ///
+  /// Waiting until the next day instead, which is what this did at first, is
+  /// too late: the evening of the exam is exactly when someone wants to say
+  /// how it went, and by the following afternoon the moment has passed.
+  static const int debriefFromHour = 18;
+
   /// The paper to ask about, or null when there is nothing to ask.
   ///
-  /// Null unless all of these hold: the date has passed, it was within
+  /// Null unless all of these hold: the paper has been sat, it was within
   /// [debriefWindowDays], the student still has that exam selected, and they
   /// have not already been asked. With more than one sat recently it picks
   /// the most recent, because that is the one on their mind.
@@ -211,8 +219,11 @@ class ExamCountdown {
       if (!selectedTests.contains(entry.key)) continue;
 
       final daysAgo = -daysUntil(entry.value, now);
-      // Not yet sat, or sat today — the paper may still be ahead of them.
-      if (daysAgo < 1) continue;
+      if (daysAgo < 0) continue; // still ahead of them
+      // On the day itself, wait until the evening: at nine in the morning the
+      // paper is still to come, and "how did it go?" would be the worst
+      // possible thing to put in front of someone about to sit it.
+      if (daysAgo == 0 && now.hour < debriefFromHour) continue;
       if (daysAgo > debriefWindowDays) continue;
       if (debriefed.contains(debriefKey(entry.key, entry.value))) continue;
 

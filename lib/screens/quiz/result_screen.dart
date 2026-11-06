@@ -111,8 +111,61 @@ class _ResultScreenState extends State<ResultScreen>
     _computeScore(); // ← initialises all score fields
     _setupAnimations();
     _saveUserProgress();
-    HapticFeedback.mediumImpact();
+    _begin();
+  }
 
+  /// Runs the entrance, but only once the student can see it.
+  ///
+  /// A good or bad score raises a full-screen overlay over this page. The
+  /// animations used to start in initState regardless, so the ring filled,
+  /// the stars landed and the bar grew behind that overlay — and the student
+  /// dismissed it to find a finished, static screen. Exactly the bug
+  /// OverlayQueue was written for, except here it is the page underneath
+  /// rather than a second overlay.
+  ///
+  /// So the overlay is awaited first. Its future completes when the sheet is
+  /// dismissed, and the entrance starts then.
+  Future<void> _begin() async {
+    final celebrate = celebratesScore(
+      attempted: _total,
+      accuracyPercent: _accuracy,
+    );
+    // _total == 0 means every question was carried over from a resumed quiz,
+    // so there is nothing to say either way.
+    final commiserate = commiseratesScore(
+      attempted: _total,
+      accuracyPercent: _accuracy,
+    );
+
+    if (celebrate || commiserate) {
+      // The overlay needs this route mounted in the tree before it can sit
+      // on top of it.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final name = _firstName();
+      if (celebrate) {
+        await UstuOverlays.showPerfectScore(
+          context,
+          name: name,
+          correct: _correct,
+          total: _total,
+        );
+      } else {
+        await UstuOverlays.showBadScore(
+          context,
+          name: name,
+          correct: _correct,
+          total: _total,
+        );
+      }
+      if (!mounted) return;
+    }
+
+    _runEntrance();
+  }
+
+  void _runEntrance() {
+    HapticFeedback.mediumImpact();
     _entranceCtrl.forward();
 
     Future.delayed(const Duration(milliseconds: 200), () {
@@ -134,39 +187,6 @@ class _ResultScreenState extends State<ResultScreen>
     if (_tier >= 2) {
       Future.delayed(const Duration(milliseconds: 1250), () {
         if (mounted) _s3Ctrl.forward();
-      });
-    }
-
-    // Same bug, and this one talks. _correct >= 7 celebrated 7/10 (70%)
-    // and _correct <= 6 commiserated with 4/4 (100%) — Ustu told a student
-    // off for getting every question right. _total == 0 means everything in
-    // this session was carried over from a resumed quiz, so there is nothing
-    // to say either way.
-    if (celebratesScore(attempted: _total, accuracyPercent: _accuracy)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          final name = _firstName();
-          UstuOverlays.showPerfectScore(
-            context,
-            name: name,
-            correct: _correct,
-            total: _total,
-          );
-        }
-      });
-    }
-
-    if (commiseratesScore(attempted: _total, accuracyPercent: _accuracy)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          final name = _firstName();
-          UstuOverlays.showBadScore(
-            context,
-            name: name,
-            correct: _correct,
-            total: _total,
-          );
-        }
       });
     }
   }
