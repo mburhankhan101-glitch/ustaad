@@ -27,7 +27,9 @@ abstract final class NetSim {
   static const green = Color(0xFF22C55E);
   static const strip = Color(0xFFE3F1F8);
   static const stripInk = Color(0xFF13475A);
-  static const page = Color(0xFFFFFFFF);
+  /// The page shares the strip's tint. Plain white made the two cards
+  /// disappear into the background and looked nothing like the real one.
+  static const page = strip;
   static const footer = Color(0xFFEDF4F8);
   static const optionFill = Color(0xFFF2F8FB);
   static const optionBorder = Color(0xFFD3E3EC);
@@ -55,13 +57,6 @@ class NetSimScreen extends ConsumerStatefulWidget {
 }
 
 class _NetSimScreenState extends ConsumerState<NetSimScreen> {
-  /// Marks the real simulator keeps per question. They are local to the
-  /// sitting on purpose: a mock that remembered your bookmarks between
-  /// attempts would behave differently from the paper it is imitating.
-  final _review = <String>{};
-  final _bookmarked = <String>{};
-  String? _justSaved;
-
   PaperSessionState get s => widget.session;
 
   int get _answeredTotal {
@@ -99,10 +94,9 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
           children: [
             _header(),
             _sectionStrip(),
-            _markPills(q),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -184,106 +178,6 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _markPills(Question q) {
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: _pill(
-              // Answers are already written to state the moment an option is
-              // tapped, so this confirms rather than performs a save. The
-              // button exists because the real one does, and because a
-              // student looking for it and not finding it is the exact
-              // surprise these screens are meant to remove.
-              icon: Icons.save_outlined,
-              label: _justSaved == q.id ? 'Saved' : 'Save',
-              active: _justSaved == q.id,
-              onTap: () {
-                HapticFeedback.selectionClick();
-                setState(() => _justSaved = q.id);
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _pill(
-              icon: Icons.format_list_bulleted,
-              label: 'Review',
-              active: _review.contains(q.id),
-              onTap: () {
-                HapticFeedback.selectionClick();
-                setState(() {
-                  _review.contains(q.id)
-                      ? _review.remove(q.id)
-                      : _review.add(q.id);
-                });
-              },
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _pill(
-              icon: Icons.bookmark_border,
-              label: 'Bookmark',
-              active: _bookmarked.contains(q.id),
-              onTap: () {
-                HapticFeedback.selectionClick();
-                setState(() {
-                  _bookmarked.contains(q.id)
-                      ? _bookmarked.remove(q.id)
-                      : _bookmarked.add(q.id);
-                });
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _pill({
-    required IconData icon,
-    required String label,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 36,
-        decoration: BoxDecoration(
-          color: active ? NetSim.selectedFill : Colors.white,
-          border: Border.all(
-            color: active ? NetSim.selectedBorder : NetSim.optionBorder,
-          ),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        alignment: Alignment.center,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 14, color: NetSim.blue),
-            const SizedBox(width: 5),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: NetSim.blue,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -533,24 +427,28 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          // The real NET ends with this as a plain underlined link rather
-          // than a button, which is worth copying exactly: it is the one
-          // irreversible control on the screen and it does not look like a
-          // control at all. A student who has met it in a mock will not
-          // hunt for it with four minutes left.
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.mediumImpact();
-              widget.onSubmit();
-            },
-            child: const Text(
-              'Click here to FINISH Your Test',
-              style: TextStyle(
-                color: NetSim.blue,
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                decoration: TextDecoration.underline,
-                decorationColor: NetSim.blue,
+          SizedBox(
+            width: double.infinity,
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.mediumImpact();
+                widget.onSubmit();
+              },
+              child: Container(
+                height: 44,
+                decoration: BoxDecoration(
+                  color: NetSim.headerDark,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                alignment: Alignment.center,
+                child: const Text(
+                  'Finish Test',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
             ),
           ),
@@ -713,17 +611,13 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
   ) {
     final q = s.sections[sec].questions[i];
     final answered = s.answers[q.id]?.selectedIndex != null;
-    final marked = _review.contains(q.id) || _bookmarked.contains(q.id);
     var number = i + 1;
     for (var k = 0; k < sec; k++) {
       number += s.sections[k].questions.length;
     }
 
-    final Color border = marked
-        ? const Color(0xFFD69E2E)
-        : answered
-            ? NetSim.selectedBorder
-            : NetSim.optionBorder;
+    final Color border =
+        answered ? NetSim.selectedBorder : NetSim.optionBorder;
 
     return GestureDetector(
       onTap: () {
@@ -737,7 +631,7 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: answered ? NetSim.selectedFill : Colors.white,
-          border: Border.all(color: border, width: marked ? 2 : 1),
+          border: Border.all(color: border),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Text(

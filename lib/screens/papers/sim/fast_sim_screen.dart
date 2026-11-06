@@ -48,8 +48,17 @@ class FastSimScreen extends ConsumerWidget {
   final VoidCallback onSubmit;
   final VoidCallback onQuit;
 
+  /// Whole-paper time remaining.
+  ///
+  /// FAST is scored section by section and the notifier ticks
+  /// sectionSecondsLeft, leaving globalSecondsLeft untouched — which is why
+  /// this read 2:00:00 for ever. Summing what is left across all sections is
+  /// the number the real simulator puts here, and it comes from live state.
   String get _clock {
-    final s = session.globalSecondsLeft;
+    final s = session.sections.fold<int>(
+      0,
+      (n, sec) => n + (session.sectionSecondsLeft[sec.config.id] ?? 0),
+    );
     final h = (s ~/ 3600).toString();
     final m = ((s % 3600) ~/ 60).toString().padLeft(2, '0');
     final sec = (s % 60).toString().padLeft(2, '0');
@@ -127,20 +136,16 @@ class FastSimScreen extends ConsumerWidget {
             child: Row(
               children: [
                 Container(
-                  width: 26,
-                  height: 26,
+                  width: 28,
+                  height: 28,
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
                   ),
-                  alignment: Alignment.center,
-                  child: const Text(
-                    'F',
-                    style: TextStyle(
-                      color: FastSim.navy,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.asset(
+                    'assets/images/fast_nu_logo.png',
+                    fit: BoxFit.cover,
                   ),
                 ),
                 const SizedBox(width: 9),
@@ -189,21 +194,6 @@ class FastSimScreen extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
-            child: Row(
-              children: [
-                Text(
-                  '${session.hashCode.abs() % 900000 + 100000}- Student',
-                  style: const TextStyle(
-                    color: FastSim.ink,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
             padding: const EdgeInsets.fromLTRB(14, 7, 14, 0),
             child: Row(
               children: [
@@ -215,47 +205,25 @@ class FastSimScreen extends ConsumerWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 9, 14, 11),
-            child: Row(
-              children: [
-                // Inert on purpose: the real one lets an invigilator toggle
-                // live checking, which a practice paper has no use for. It
-                // is here because its absence is the kind of small thing a
-                // student notices on the day.
-                Container(
-                  width: 34,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE2E8F0),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.all(2),
-                  child: Container(
-                    width: 14,
-                    height: 14,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(blurRadius: 2, color: Color(0x33000000)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 9),
-                const Text(
-                  'Live Check',
-                  style: TextStyle(
+                const Spacer(),
+                // The count stays, as a read-out rather than a button. It is
+                // the number a student checks before submitting, and the
+                // button slot was better spent on moving between sections.
+                Text(
+                  '$_unanswered unanswered',
+                  style: const TextStyle(
                     color: FastSim.greyText,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 11),
+            child: Row(
+              children: [
                 const Spacer(),
                 const Text(
                   '2026 - Engineering & CS',
@@ -454,12 +422,16 @@ class FastSimScreen extends ConsumerWidget {
             const SizedBox(width: 10),
             Expanded(
               child: _button(
-                label: 'Unanswered ($_unanswered)',
-                icon: Icons.list_alt,
+                label: 'Next Section',
+                icon: Icons.skip_next,
                 iconLeading: true,
                 fill: FastSim.blue,
                 textColor: Colors.white,
-                onTap: () => _showUnanswered(context, notifier),
+                onTap: session.currentSectionIndex <
+                        session.sections.length - 1
+                    ? () => notifier
+                        .switchToSection(session.currentSectionIndex + 1)
+                    : null,
               ),
             ),
           ],
@@ -513,119 +485,6 @@ class FastSimScreen extends ConsumerWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: iconLeading ? content : content.reversed.toList(),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showUnanswered(BuildContext context, PaperSessionNotifier notifier) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
-      ),
-      builder: (_) => _UnansweredSheet(session: session, notifier: notifier),
-    );
-  }
-}
-
-class _UnansweredSheet extends StatelessWidget {
-  const _UnansweredSheet({required this.session, required this.notifier});
-
-  final PaperSessionState session;
-  final PaperSessionNotifier notifier;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.72,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 10),
-              child: Text(
-                'Unanswered Questions',
-                style: TextStyle(
-                  color: FastSim.ink,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            Flexible(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
-                children: [
-                  for (var s = 0; s < session.sections.length; s++) ...[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6, bottom: 8),
-                      child: Text(
-                        session.sections[s].config.label,
-                        style: const TextStyle(
-                          color: FastSim.blue,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: [
-                        for (var i = 0;
-                            i < session.sections[s].questions.length;
-                            i++)
-                          _cell(context, s, i),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _cell(BuildContext context, int sectionIdx, int qIdx) {
-    final q = session.sections[sectionIdx].questions[qIdx];
-    final answered = session.answers[q.id]?.selectedIndex != null;
-    var number = qIdx + 1;
-    for (var i = 0; i < sectionIdx; i++) {
-      number += session.sections[i].questions.length;
-    }
-    return GestureDetector(
-      onTap: () {
-        Navigator.of(context).pop();
-        notifier.switchToSection(sectionIdx);
-        notifier.jumpToPage(qIdx, 1);
-      },
-      child: Container(
-        width: 40,
-        height: 34,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: answered ? FastSim.green : Colors.white,
-          border: Border.all(
-            color: answered ? FastSim.green : FastSim.cardBorder,
-          ),
-          borderRadius: BorderRadius.circular(3),
-        ),
-        child: Text(
-          '$number',
-          style: TextStyle(
-            color: answered ? Colors.white : FastSim.ink,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
           ),
         ),
       ),
