@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/providers/paper_provder.dart';
+import 'package:ustaad/screens/papers/sim/fast_sim_screen.dart';
 import '../../models/paper_model.dart';
 import 'paper_result_screen.dart';
 
@@ -87,6 +88,69 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
     );
   }
 
+  /// Submit from the simulator's own header button.
+  ///
+  /// Asks first, and says how many are unanswered, because the real paper
+  /// does and because submitting 119 blanks by accident is unrecoverable.
+  void _confirmSubmit(BuildContext context) {
+    final session = ref.read(paperSessionProvider).valueOrNull;
+    if (session == null) return;
+    var unanswered = 0;
+    for (final sec in session.sections) {
+      for (final q in sec.questions) {
+        if (session.answers[q.id]?.selectedIndex == null) unanswered++;
+      }
+    }
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text(
+          'Submit paper?',
+          style: TextStyle(
+            color: Color(0xFF1A202C),
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          unanswered == 0
+              ? 'You have answered every question. This cannot be undone.'
+              : '$unanswered question(s) are still unanswered. '
+                  'This cannot be undone.',
+          style: const TextStyle(color: Color(0xFF4A5568), fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Keep going'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              final result = ref
+                  .read(paperSessionProvider.notifier)
+                  .submitPaper();
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PaperResultScreen(result: result),
+                ),
+              );
+            },
+            child: const Text(
+              'Submit',
+              style: TextStyle(
+                color: Color(0xFFC53030),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isWeb = MediaQuery.of(context).size.width > 600;
@@ -136,21 +200,23 @@ class _FastPaperScreenState extends ConsumerState<FastPaperScreen> {
                           ),
                         ),
                       )
-                    : SafeArea(
-                        child: sessionAsync.when(
-                          loading: () =>
-                              const _LoadingView(message: 'Loading paper...'),
-                          error: (e, _) => _ErrorView(error: e.toString()),
-                          data: (session) {
-                            if (session == null)
-                              return const _LoadingView(
-                                message: 'Preparing...',
-                              );
-                            if (session.isSubmitted)
-                              return const SizedBox.shrink();
-                            return _FastExamBody(session: session);
-                          },
-                        ),
+                    : sessionAsync.when(
+                        loading: () =>
+                            const _LoadingView(message: 'Loading paper...'),
+                        error: (e, _) => _ErrorView(error: e.toString()),
+                        data: (session) {
+                          if (session == null) {
+                            return const _LoadingView(message: 'Preparing...');
+                          }
+                          if (session.isSubmitted) {
+                            return const SizedBox.shrink();
+                          }
+                          return FastSimScreen(
+                            session: session,
+                            onSubmit: () => _confirmSubmit(context),
+                            onQuit: () => _showQuitDialog(context),
+                          );
+                        },
                       ),
               ),
             ),

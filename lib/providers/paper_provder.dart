@@ -274,6 +274,23 @@ class PaperSessionNotifier
     state = AsyncValue.data(current.copyWith(answers: updated));
   }
 
+  /// Puts a question back to unanswered.
+  ///
+  /// The real FAST simulator has a Reset Choice button, and a student who
+  /// has narrowed it to two and wants to come back clean expects it to work.
+  /// Removing the entry rather than storing a sentinel matters: everything
+  /// that counts progress tests `selectedIndex != null`, so a -1 would read
+  /// as answered everywhere and the unanswered count would lie.
+  void clearAnswer() {
+    final current = state.valueOrNull;
+    if (current == null || current.isSubmitted) return;
+    final qId = current.currentQuestion.id;
+    if (current.answers[qId]?.isConfirmed == true) return;
+    final updated = Map<String, QuestionAnswer>.from(current.answers)
+      ..remove(qId);
+    state = AsyncValue.data(current.copyWith(answers: updated));
+  }
+
   void confirmAnswer() {
     final current = state.valueOrNull;
     if (current == null || current.isSubmitted) return;
