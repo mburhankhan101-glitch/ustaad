@@ -403,7 +403,7 @@ class FastSimScreen extends ConsumerWidget {
           left == 0
               ? 'You cannot come back to this section afterwards, exactly as '
                   'in the real test.'
-              : '\$left question(s) in this section are still unanswered, and '
+              : '$left question(s) in this section are still unanswered, and '
                   'you cannot come back to them afterwards — exactly as in '
                   'the real test.',
           style: const TextStyle(color: Color(0xFF4A5568), fontSize: 14),

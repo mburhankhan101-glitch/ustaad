@@ -1,19 +1,28 @@
 // lib/screens/papers/paper_result_screen.dart
 // Style C – Full-width web dashboard with navbar & two columns
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../providers/paper_provder.dart';
+import 'fast_paper_screen.dart';
+import 'medical_paper_screen.dart';
+import 'nts_paper_screen.dart';
+import 'nust_paper_screen.dart';
 import '../../models/paper_model.dart';
 import '../../providers/progress_provider.dart';
 
-class PaperResultScreen extends StatefulWidget {
+class PaperResultScreen extends ConsumerStatefulWidget {
   final PaperResult result;
   const PaperResultScreen({super.key, required this.result});
 
   @override
-  State<PaperResultScreen> createState() => _PaperResultScreenState();
+  ConsumerState<PaperResultScreen> createState() =>
+      _PaperResultScreenState();
 }
 
-class _PaperResultScreenState extends State<PaperResultScreen> {
+class _PaperResultScreenState extends ConsumerState<PaperResultScreen> {
   /// Counts by default, percentages on tap — the same gesture as the
   /// quiz result screen, so the two behave alike.
   bool _showPercent = false;
@@ -138,7 +147,7 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
       child: Row(
         children: [
           GestureDetector(
-            onTap: () => Navigator.pop(context),
+            onTap: _retryPaper,
             child: Container(
               width: 36,
               height: 36,
@@ -528,6 +537,45 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
     );
   }
 
+  /// Sits the same paper again.
+  ///
+  /// This used to be a single Navigator.pop, which landed wherever the paper
+  /// happened to have been launched from rather than doing what the button
+  /// says. Resetting the session and pushing a fresh paper screen is both
+  /// what a student expects and independent of how they got here.
+  void _retryPaper() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      context.go('/home');
+      return;
+    }
+    final examType = widget.result.examType;
+    ref.read(paperSessionProvider.notifier).reset();
+
+    Widget screen;
+    switch (examType) {
+      case ExamType.fastNU:
+        screen = FastPaperScreen(examType: examType);
+        break;
+      case ExamType.nustNET:
+        screen = NustPaperScreen(examType: examType);
+        break;
+      case ExamType.nts:
+        screen = NtsPaperScreen(examType: examType);
+        break;
+      case ExamType.mdcat:
+        screen = MdcatPaperScreen(examType: examType);
+        break;
+      case ExamType.numsMdcat:
+        screen = NumsPaperScreen(examType: examType);
+        break;
+    }
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+    );
+  }
+
   Widget _buildButtons() {
     return Row(
       children: [
@@ -557,7 +605,7 @@ class _PaperResultScreenState extends State<PaperResultScreen> {
         Expanded(
           flex: 2,
           child: GestureDetector(
-            onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
+            onTap: () => context.go('/home'),
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 13),
               decoration: BoxDecoration(

@@ -117,7 +117,14 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
   // ── Header ───────────────────────────────────────────────────────────────
 
   Widget _header() {
-    final mins = (s.globalSecondsLeft / 60).ceil();
+    // Minutes alone sat still for a minute at a time, and a countdown that
+    // does not visibly move is not a countdown. In the last ten minutes of
+    // a paper the seconds are the whole point.
+    final left = s.globalSecondsLeft;
+    final hh = left ~/ 3600;
+    final mm = ((left % 3600) ~/ 60).toString().padLeft(2, '0');
+    final ss = (left % 60).toString().padLeft(2, '0');
+    final clock = hh > 0 ? '$hh:$mm:$ss' : '$mm:$ss';
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -142,7 +149,7 @@ class _NetSimScreenState extends ConsumerState<NetSimScreen> {
           const Icon(Icons.access_time, color: Colors.white, size: 15),
           const SizedBox(width: 6),
           Text(
-            '$mins min',
+            clock,
             style: const TextStyle(
               color: NetSim.green,
               fontSize: 14.5,
