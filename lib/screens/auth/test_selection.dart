@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
 import 'package:ustaad/core/notifications/push_service.dart';
@@ -320,149 +321,34 @@ class TestSelectionScreen extends StatefulWidget {
   State<TestSelectionScreen> createState() => _TestSelectionScreenState();
 }
 
-class _TestSelectionScreenState extends State<TestSelectionScreen>
-    with TickerProviderStateMixin {
+class _TestSelectionScreenState extends State<TestSelectionScreen> {
   final Set<String> _selectedTestIds = {};
   String? _selectedDegreeId;
   bool _isSaving = false;
 
-  bool _degreeSheetOpen = false;
-  String _degreeSearch = '';
-  final _degreeSearchController = TextEditingController();
 
-  late final AnimationController _ustuController;
-  late final Animation<double> _ustuBounce;
 
-  late final AnimationController _btnController;
 
-  late final AnimationController _cardsController;
-  late final List<Animation<Offset>> _cardSlides;
-  late final List<Animation<double>> _cardFades;
 
   bool get _canContinue =>
       _selectedTestIds.isNotEmpty && _selectedDegreeId != null;
 
-  Widget _buildAnimatedTestCard(int i) {
-    final test = _tests[i];
-    final isSelected = _selectedTestIds.contains(test.id);
-    final subjects = test.subjectsFor(_selectedDegreeId);
-    return SlideTransition(
-      position: _cardSlides[i],
-      child: FadeTransition(
-        opacity: _cardFades[i],
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: _TestCard(
-            test: test,
-            isSelected: isSelected,
-            subjects: subjects,
-            showWeightages: _selectedDegreeId != null,
-            onTap: () => _toggleTest(test.id),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   void initState() {
     super.initState();
-
-    _ustuController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 650),
-    );
-    _ustuBounce = TweenSequence([
-      TweenSequenceItem(
-        tween: Tween(
-          begin: 1.0,
-          end: 1.22,
-        ).chain(CurveTween(curve: Curves.easeOut)),
-        weight: 35,
-      ),
-      TweenSequenceItem(
-        tween: Tween(
-          begin: 1.22,
-          end: 0.92,
-        ).chain(CurveTween(curve: Curves.easeIn)),
-        weight: 30,
-      ),
-      TweenSequenceItem(
-        tween: Tween(
-          begin: 0.92,
-          end: 1.0,
-        ).chain(CurveTween(curve: Curves.elasticOut)),
-        weight: 35,
-      ),
-    ]).animate(_ustuController);
-
-    _btnController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
-
-    _cardsController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
-    // Stagger each card's entrance across the controller's 0..1 range.
-    // Each card animates over a 0.55-length window; starts are spread
-    // evenly so the LAST card's window always ends exactly at 1.0 —
-    // this must scale with _tests.length or Interval's end goes past 1.0
-    // and throws (this broke the moment a 4th/5th test was added; the
-    // old hardcoded 0.18 step only ever worked for 3 items).
-    const cardWindow = 0.55;
-    final maxStart = 1.0 - cardWindow;
-    final stepStart = _tests.length > 1 ? maxStart / (_tests.length - 1) : 0.0;
-
-    _cardSlides = List.generate(_tests.length, (i) {
-      final start = (i * stepStart).clamp(0.0, maxStart);
-      final end = (start + cardWindow).clamp(0.0, 1.0);
-      return Tween<Offset>(
-        begin: const Offset(0.0, 0.45),
-        end: Offset.zero,
-      ).animate(
-        CurvedAnimation(
-          parent: _cardsController,
-          curve: Interval(start, end, curve: Curves.easeOutCubic),
-        ),
-      );
-    });
-    _cardFades = List.generate(_tests.length, (i) {
-      final start = (i * stepStart).clamp(0.0, maxStart);
-      final end = (start + cardWindow).clamp(0.0, 1.0);
-      return Tween<double>(begin: 0, end: 1).animate(
-        CurvedAnimation(
-          parent: _cardsController,
-          curve: Interval(start, end, curve: Curves.easeOut),
-        ),
-      );
-    });
-
-    _cardsController.forward();
-
-    // always show the button area (just disabled until valid)
-    _btnController.forward();
-
-    // ── Pre-populate when editing existing selections ─────────────────────
+    // Profile opens this screen to change an existing choice, so it starts
+    // on what the student already picked rather than blank.
     if (widget.isEditing) {
       _selectedTestIds.addAll(widget.initialTests);
       _selectedDegreeId = widget.initialDegree;
-      // Trigger owl bounce so user sees the pre-filled state
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _ustuController.forward(from: 0);
-      });
     }
   }
 
   @override
   void dispose() {
-    _ustuController.dispose();
-    _btnController.dispose();
-    _cardsController.dispose();
-    _degreeSearchController.dispose();
     super.dispose();
   }
+
 
   void _toggleTest(String id) {
     setState(() {
@@ -472,15 +358,11 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
         _selectedTestIds.add(id);
       }
     });
-    _ustuController.forward(from: 0);
   }
 
   void _selectDegree(String id) {
     setState(() {
       _selectedDegreeId = id;
-      _degreeSheetOpen = false;
-      _degreeSearch = '';
-      _degreeSearchController.clear();
 
       // Switching stream invalidates anything ticked in the other one. Without
       // this, picking NET first and then a medical degree would leave NET
@@ -490,28 +372,13 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
         (testId) => _tests.firstWhere((t) => t.id == testId).stream != stream,
       );
     });
-    _ustuController.forward(from: 0);
   }
 
-  /// Stream implied by the chosen degree, or null while none is chosen.
-  _Stream? get _selectedStream => _selectedDegree?.stream;
-
-  /// Sections are derived from the data rather than listed by hand. The old
-  /// screen called _buildAnimatedTestCard(0..3) explicitly, so NUMS — added to
-  /// the data as index 4 — was never rendered at all.
+  /// Sections are derived from the data rather than listed by hand, so a
+  /// test added to the list appears without anyone remembering to render it.
   List<_TestOption> _testsIn(_Stream stream) =>
       _tests.where((t) => t.stream == stream).toList();
 
-  /// Before a degree is picked, show everything. After, show only the matching
-  /// stream so an impossible pairing cannot be built in the first place.
-  bool _showsStream(_Stream stream) =>
-      _selectedStream == null || _selectedStream == stream;
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // _continue — handles BOTH onboarding (isEditing=false) and profile edit
-  // (isEditing=true). In edit mode: detects no-change, shows warning dialog,
-  // clears exam-specific Firestore data, then pops instead of going to /home.
-  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _continue() async {
     if (!_canContinue || _isSaving) return;
 
@@ -671,20 +538,30 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
       ? null
       : _degrees.firstWhere((d) => d.id == _selectedDegreeId);
 
-  List<_DegreeOption> get _filteredDegrees => _degreeSearch.isEmpty
-      ? _degrees
-      : _degrees
-            .where(
-              (d) =>
-                  d.label.toLowerCase().contains(_degreeSearch.toLowerCase()) ||
-                  d.subtitle.toLowerCase().contains(
-                    _degreeSearch.toLowerCase(),
-                  ),
-            )
-            .toList();
+
+  @override
+  // ───────────────────────────────────────────────────────────────────────
+  // UI
+  //
+  // Rebuilt to be a page a student reads once and answers. What was here
+  // before had an animated owl, decorative circles, per-card icons and
+  // accent colours, bordered cards sliding in on a stagger, a searchable
+  // bottom sheet for degrees, and weightages as coloured pills. All of it
+  // was decoration around two questions, and it made a two-question page
+  // feel like a product tour.
+  //
+  // What remains: the gradient, two lists, and a button. The weightages
+  // stay because they are the reason a student can choose confidently
+  // rather than guess — as small grey text, which is what they are.
+  //
+  // None of the logic below the fold changed: the same selections, the same
+  // stream rule, the same save, the same edit mode from the profile.
+  // ───────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final degree = _selectedDegree;
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -695,779 +572,199 @@ class _TestSelectionScreenState extends State<TestSelectionScreen>
             stops: [0.0, 0.5, 1.0],
           ),
         ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -80,
-              right: -80,
-              child: Container(
-                height: 250,
-                width: 250,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.05),
-                ),
-              ),
-            ),
-            Positioned(
-              bottom: -100,
-              left: -60,
-              child: Container(
-                height: 300,
-                width: 300,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.05),
-                ),
-              ),
-            ),
-
-            SafeArea(
-              child: Column(
-                children: [
-                  // ── Back button — only shown when editing from Profile ────
-                  if (widget.isEditing)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 8),
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: Colors.white,
-                            size: 20,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: ListView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  children: [
+                    if (widget.isEditing)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(context, false),
+                          child: const Padding(
+                            padding: EdgeInsets.only(bottom: 12),
+                            child: Icon(Icons.arrow_back,
+                                color: Colors.white70, size: 22),
                           ),
-                          onPressed: () => Navigator.pop(context, false),
                         ),
+                      ),
+                    Text(
+                      widget.isEditing
+                          ? 'Change your test'
+                          : 'What are you preparing for?',
+                      style: const TextStyle(
+                        fontFamily: 'Poppins',
+                        color: Colors.white,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        height: 1.25,
                       ),
                     ),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            SizedBox(height: widget.isEditing ? 8 : 28),
+                    const SizedBox(height: 28),
 
-                            ScaleTransition(
-                              scale: _ustuBounce,
-                              child: _UstuOwl(
-                                isHappy: _canContinue,
-                                hasPartial:
-                                    _selectedTestIds.isNotEmpty ||
-                                    _selectedDegreeId != null,
-                              ),
-                            ),
+                    _heading('Degree'),
+                    for (final d in _degrees) _degreeRow(d),
 
-                            const SizedBox(height: 20),
+                    if (degree != null) ...[
+                      const SizedBox(height: 28),
+                      _heading('Tests'),
+                      for (final t in _testsIn(degree.stream)) _testRow(t),
+                    ],
+                  ],
+                ),
+              ),
+              _continueBar(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-                            Text(
-                              widget.isEditing
-                                  ? 'Update Your Prep 🎯'
-                                  : 'Personalise Your Prep 🎯',
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
-                                fontSize: 24,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
+  Widget _heading(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontFamily: 'Poppins',
+            color: Colors.white.withOpacity(0.5),
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
 
-                            const SizedBox(height: 6),
+  Widget _degreeRow(_DegreeOption d) {
+    final on = _selectedDegreeId == d.id;
+    return _row(
+      selected: on,
+      onTap: () => _selectDegree(d.id),
+      title: d.label,
+      subtitle: d.subtitle,
+    );
+  }
 
-                            Text(
-                              widget.isEditing
-                                  ? 'Update your exams and degree.\nWeak topic history will reset on change.'
-                                  : 'Select all exams you\'re preparing for.\nUstu will tailor your quizzes accordingly.',
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
-                                fontSize: 13,
-                                color: Colors.white.withOpacity(0.6),
-                                height: 1.6,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
+  Widget _testRow(_TestOption t) {
+    final on = _selectedTestIds.contains(t.id);
+    final subjects = t.subjectsFor(_selectedDegreeId);
+    // "Maths 50 · Physics 30 · English 20" — the split, in the order the
+    // paper weights it, without a pill or a bar chart in sight.
+    final weights = subjects
+        .map((s) => '${s.name} ${(s.weightage * 100).round()}')
+        .join('  ·  ');
+    return _row(
+      selected: on,
+      onTap: () => _toggleTest(t.id),
+      title: t.fullName,
+      subtitle: weights.isEmpty ? t.shortName : weights,
+    );
+  }
 
-                            const SizedBox(height: 28),
-
-                            // ── Degree selector ──────────────────────
-                            _SectionLabel(label: 'Target Degree'),
-                            const SizedBox(height: 10),
-                            _DegreeSelector(
-                              selected: _selectedDegree,
-                              isOpen: _degreeSheetOpen,
-                              searchController: _degreeSearchController,
-                              filteredDegrees: _filteredDegrees,
-                              onTap: () => setState(
-                                () => _degreeSheetOpen = !_degreeSheetOpen,
-                              ),
-                              onSearchChanged: (v) =>
-                                  setState(() => _degreeSearch = v),
-                              onSelectDegree: _selectDegree,
-                            ),
-
-                            const SizedBox(height: 28),
-
-                            // ── Engineering & CS section ──────────────
-                            if (_showsStream(_Stream.engineering)) ...[
-                              _SectionLabel(
-                                label: '🎓 Engineering & CS',
-                                note: 'Select all that apply',
-                              ),
-                              const SizedBox(height: 10),
-                              for (final t in _testsIn(_Stream.engineering))
-                                _buildAnimatedTestCard(_tests.indexOf(t)),
-                              const SizedBox(height: 4),
-                            ],
-
-                            // ── Medical section ───────────────────────
-                            if (_showsStream(_Stream.medical)) ...[
-                              _SectionLabel(
-                                label: '🏥 Medical',
-                                note: 'Select all that apply',
-                              ),
-                              const SizedBox(height: 10),
-                              for (final t in _testsIn(_Stream.medical))
-                                _buildAnimatedTestCard(_tests.indexOf(t)),
-                              const SizedBox(height: 8),
-                            ],
-                          ],
-                        ),
-                      ),
+  /// One row, used for both lists. A tick on the right and brighter text is
+  /// the whole selected state — no border, no fill, no card.
+  Widget _row({
+    required bool selected,
+    required VoidCallback onTap,
+    required String title,
+    required String subtitle,
+  }) {
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white.withOpacity(selected ? 1 : 0.86),
+                      fontSize: 15,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
+                      height: 1.3,
                     ),
                   ),
-
-                  // ── Bottom button area ────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          child: !_canContinue
-                              ? Padding(
-                                  key: const ValueKey('hint'),
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: Text(
-                                    _selectedTestIds.isEmpty &&
-                                            _selectedDegreeId == null
-                                        ? 'Select your degree and at least one exam'
-                                        : _selectedDegreeId == null
-                                        ? 'Now select your target degree ☝️'
-                                        : 'Now pick at least one exam ☝️',
-                                    style: TextStyle(
-                                      fontFamily: 'Poppins',
-                                      fontSize: 12,
-                                      color: Colors.white.withOpacity(0.45),
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                )
-                              : const SizedBox(key: ValueKey('empty')),
-                        ),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: ElevatedButton(
-                            onPressed: _canContinue && !_isSaving
-                                ? _continue
-                                : null,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              foregroundColor: const Color(0xFF6C63FF),
-                              disabledBackgroundColor: Colors.white.withOpacity(
-                                0.2,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              elevation: 0,
-                            ),
-                            child: _isSaving
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Color(0xFF6C63FF),
-                                    ),
-                                  )
-                                : Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        widget.isEditing
-                                            ? 'Save Changes'
-                                            : "Let's Go!",
-                                        style: const TextStyle(
-                                          fontFamily: 'Poppins',
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Icon(
-                                        widget.isEditing
-                                            ? Icons.check_rounded
-                                            : Icons.arrow_forward_rounded,
-                                        size: 20,
-                                      ),
-                                    ],
-                                  ),
-                          ),
-                        ),
-                      ],
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontFamily: 'Poppins',
+                      color: Colors.white.withOpacity(0.45),
+                      fontSize: 12,
+                      height: 1.4,
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 14),
+            Icon(
+              selected ? Icons.check_circle : Icons.circle_outlined,
+              size: 21,
+              color: selected
+                  ? Colors.white
+                  : Colors.white.withOpacity(0.25),
+            ),
           ],
         ),
       ),
     );
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DEGREE SELECTOR
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DegreeSelector extends StatelessWidget {
-  final _DegreeOption? selected;
-  final bool isOpen;
-  final TextEditingController searchController;
-  final List<_DegreeOption> filteredDegrees;
-  final VoidCallback onTap;
-  final ValueChanged<String> onSearchChanged;
-  final ValueChanged<String> onSelectDegree;
-
-  const _DegreeSelector({
-    required this.selected,
-    required this.isOpen,
-    required this.searchController,
-    required this.filteredDegrees,
-    required this.onTap,
-    required this.onSearchChanged,
-    required this.onSelectDegree,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Trigger
-        GestureDetector(
-          onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(selected != null ? 0.12 : 0.07),
-              borderRadius: BorderRadius.vertical(
-                top: const Radius.circular(14),
-                bottom: isOpen ? Radius.zero : const Radius.circular(14),
-              ),
-              border: Border.all(
-                color: selected != null
-                    ? Colors.white.withOpacity(0.4)
-                    : Colors.white.withOpacity(0.15),
-                width: selected != null ? 1.5 : 1,
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  selected?.icon ?? Icons.school_outlined,
-                  color: selected != null ? Colors.white : Colors.white38,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: selected == null
-                      ? Text(
-                          'What degree are you aiming for?',
-                          style: TextStyle(
-                            fontFamily: 'Poppins',
-                            fontSize: 14,
-                            color: Colors.white.withOpacity(0.35),
-                          ),
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              selected!.label,
-                              style: const TextStyle(
-                                fontFamily: 'Poppins',
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
-                            Text(
-                              selected!.subtitle,
-                              style: TextStyle(
-                                fontFamily: 'Poppins',
-                                fontSize: 11,
-                                color: Colors.white.withOpacity(0.5),
-                              ),
-                            ),
-                          ],
-                        ),
-                ),
-                AnimatedRotation(
-                  turns: isOpen ? 0.5 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: Colors.white.withOpacity(0.5),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // Dropdown
-        AnimatedCrossFade(
-          duration: const Duration(milliseconds: 220),
-          crossFadeState: isOpen
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          firstChild: const SizedBox.shrink(),
-          secondChild: Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF0E1340),
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(14),
-              ),
-              border: Border.all(color: Colors.white.withOpacity(0.15)),
-            ),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: TextField(
-                    controller: searchController,
-                    onChanged: onSearchChanged,
-                    autofocus: isOpen,
-                    style: const TextStyle(
-                      fontFamily: 'Poppins',
-                      color: Colors.white,
-                      fontSize: 13,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Search degree...',
-                      hintStyle: TextStyle(
-                        fontFamily: 'Poppins',
-                        color: Colors.white.withOpacity(0.3),
-                        fontSize: 13,
-                      ),
-                      prefixIcon: const Icon(
-                        Icons.search,
-                        color: Colors.white38,
-                        size: 18,
-                      ),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.07),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-                ...filteredDegrees.map(
-                  (degree) => InkWell(
-                    onTap: () => onSelectDegree(degree.id),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          top: BorderSide(
-                            color: Colors.white.withOpacity(0.06),
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(degree.icon, color: Colors.white54, size: 18),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  degree.label,
-                                  style: const TextStyle(
-                                    fontFamily: 'Poppins',
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                Text(
-                                  degree.subtitle,
-                                  style: TextStyle(
-                                    fontFamily: 'Poppins',
-                                    fontSize: 11,
-                                    color: Colors.white.withOpacity(0.4),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TEST CARD
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _TestCard extends StatelessWidget {
-  final _TestOption test;
-  final bool isSelected;
-  final List<_Subject> subjects;
-  final bool showWeightages;
-  final VoidCallback onTap;
-
-  const _TestCard({
-    required this.test,
-    required this.isSelected,
-    required this.subjects,
-    required this.showWeightages,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          color: isSelected
-              ? test.accentColor.withOpacity(0.15)
-              : Colors.white.withOpacity(0.06),
-          border: Border.all(
-            color: isSelected
-                ? test.accentColor
-                : Colors.white.withOpacity(0.13),
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: test.accentColor.withOpacity(0.22),
-                    blurRadius: 18,
-                    offset: const Offset(0, 5),
-                  ),
-                ]
-              : [],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  height: 48,
-                  width: 48,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    color: isSelected
-                        ? test.accentColor.withOpacity(0.25)
-                        : Colors.white.withOpacity(0.07),
-                    border: Border.all(
-                      color: isSelected
-                          ? test.accentColor.withOpacity(0.5)
-                          : Colors.white.withOpacity(0.1),
-                    ),
-                  ),
-                  child: Icon(
-                    test.icon,
-                    color: isSelected ? test.accentColor : Colors.white38,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        test.shortName,
-                        style: const TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                      Text(
-                        test.fullName,
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 11,
-                          color: Colors.white.withOpacity(0.45),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // Checkbox (square for multi-select)
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  height: 26,
-                  width: 26,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                    color: isSelected ? test.accentColor : Colors.transparent,
-                    border: Border.all(
-                      color: isSelected
-                          ? test.accentColor
-                          : Colors.white.withOpacity(0.25),
-                      width: 2,
-                    ),
-                  ),
-                  child: isSelected
-                      ? const Icon(
-                          Icons.check_rounded,
-                          size: 16,
-                          color: Colors.white,
-                        )
-                      : null,
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-
-            Text(
-              test.description,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 12,
-                color: Colors.white.withOpacity(0.6),
-              ),
-            ),
-
-            // Weightage bars — appear once degree is picked
-            if (showWeightages && subjects.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'SUBJECT WEIGHTAGES FOR YOUR DEGREE',
-                      style: TextStyle(
-                        fontFamily: 'Poppins',
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white.withOpacity(0.35),
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...subjects.map(
-                      (s) => _WeightageRow(
-                        subject: s,
-                        accentColor: test.accentColor,
-                        isCardSelected: isSelected,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WEIGHTAGE ROW
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _WeightageRow extends StatelessWidget {
-  final _Subject subject;
-  final Color accentColor;
-  final bool isCardSelected;
-
-  const _WeightageRow({
-    required this.subject,
-    required this.accentColor,
-    required this.isCardSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final pct = (subject.weightage * 100).toInt();
+  Widget _continueBar() {
+    final ready = _canContinue && !_isSaving;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 7),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 130,
-            child: Text(
-              subject.name,
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 11,
-                color: Colors.white.withOpacity(0.75),
-              ),
-              overflow: TextOverflow.ellipsis,
+      padding: const EdgeInsets.fromLTRB(24, 10, 24, 20),
+      child: SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: ElevatedButton(
+          onPressed: ready ? _continue : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white,
+            disabledBackgroundColor: Colors.white.withOpacity(0.18),
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: subject.weightage,
-                minHeight: 6,
-                backgroundColor: Colors.white.withOpacity(0.08),
-                valueColor: AlwaysStoppedAnimation(
-                  isCardSelected ? accentColor : Colors.white.withOpacity(0.3),
+          child: _isSaving
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF1A1464),
+                  ),
+                )
+              : Text(
+                  widget.isEditing ? 'Save' : 'Continue',
+                  style: TextStyle(
+                    fontFamily: 'Poppins',
+                    color: ready
+                        ? const Color(0xFF1A1464)
+                        : Colors.white.withOpacity(0.55),
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 34,
-            child: Text(
-              '$pct%',
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: isCardSelected
-                    ? accentColor
-                    : Colors.white.withOpacity(0.5),
-              ),
-              textAlign: TextAlign.right,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
-  final String label;
-  final String? note;
-
-  const _SectionLabel({required this.label, this.note});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontFamily: 'Poppins',
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-            letterSpacing: 0.3,
-          ),
-        ),
-        if (note != null) ...[
-          const Spacer(),
-          Text(
-            note!,
-            style: TextStyle(
-              fontFamily: 'Poppins',
-              fontSize: 11,
-              color: Colors.white.withOpacity(0.4),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _UstuOwl extends StatelessWidget {
-  final bool isHappy;
-  final bool hasPartial;
-
-  const _UstuOwl({required this.isHappy, required this.hasPartial});
-
-  @override
-  Widget build(BuildContext context) {
-    // Replace with: Lottie.asset('assets/lottie/ustu_owl.json', height: 100, width: 100)
-    return Container(
-      height: 100,
-      width: 100,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.white.withOpacity(0.07),
-        border: Border.all(
-          color: isHappy
-              ? Colors.white.withOpacity(0.45)
-              : hasPartial
-              ? Colors.white.withOpacity(0.25)
-              : Colors.white.withOpacity(0.12),
-          width: isHappy ? 2.5 : 1.5,
-        ),
-        boxShadow: isHappy
-            ? [
-                BoxShadow(
-                  color: const Color(0xFF6C63FF).withOpacity(0.45),
-                  blurRadius: 28,
-                  spreadRadius: 4,
-                ),
-              ]
-            : [],
-      ),
-      child: Center(
-        child: Text(
-          isHappy ? '🦉✨' : '🦉',
-          style: const TextStyle(fontSize: 46),
         ),
       ),
     );
