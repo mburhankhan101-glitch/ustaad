@@ -115,6 +115,83 @@ const _nustNetSections = [
     barColor: UstaadColors.success,
   ),
 ];
+/// What a Business or FinTech student sits at NUST: Quantitative Mathematics
+/// and English, half each. No Physics, and no Advanced Maths.
+///
+/// Labelled "Basic Maths" rather than "Maths" because that is what it is.
+/// The engineering NET paper mixes Advanced and Basic, so "Maths" is a fair
+/// name there; the Business paper is Quantitative only, which is the same
+/// ground FAST calls Basic Maths. Calling it "Maths" would have a Business
+/// student bracing for calculus that is not on their paper.
+const _nustBusinessSections = [
+  QuizSection(
+    emoji: '📐',
+    title: 'Basic Maths',
+    dbSection: 'Quantitative',
+    weightLabel: '50% of NUST-NET',
+    barColor: UstaadColors.primary,
+  ),
+  QuizSection(
+    emoji: '📝',
+    title: 'English',
+    dbSection: 'English',
+    weightLabel: '50% of NUST-NET',
+    barColor: UstaadColors.success,
+  ),
+];
+
+/// FAST Business: Basic Maths, Analytical Reasoning and English.
+///
+/// The percentages are marks, not questions, which is the convention the
+/// other tiles already use — English is 30 of the 120 questions but only
+/// 10% of the marks. They do not sum to 100 because Essay Writing takes
+/// 15%, and an essay is written rather than answered, so it is not here.
+const _fastBusinessSections = [
+  QuizSection(
+    emoji: '📐',
+    title: 'Basic Maths',
+    dbSection: 'Quantitative',
+    weightLabel: '50% of FAST-NU',
+    barColor: UstaadColors.primary,
+  ),
+  QuizSection(
+    emoji: '🧩',
+    title: 'IQ & Analytical',
+    dbSection: 'Analytical',
+    weightLabel: '25% of FAST-NU',
+    barColor: UstaadColors.gold,
+  ),
+  QuizSection(
+    emoji: '📝',
+    title: 'English',
+    dbSection: 'English',
+    weightLabel: '10% of FAST-NU',
+    barColor: UstaadColors.success,
+  ),
+];
+
+/// The subjects a student should actually be practising.
+///
+/// A test does not fix its own subjects: a Business candidate at NUST sits
+/// Quantitative and English, where an engineering candidate sits Maths,
+/// Physics and English. Showing everyone the engineering tiles puts Physics
+/// in front of someone who will never be examined on it, and buries the two
+/// subjects that are their whole paper.
+///
+/// Degrees with no special paper fall through to the test's own list.
+List<QuizSection> sectionsForDegree(ExamTab tab, String? degreeId) {
+  final business = degreeId == 'business' || degreeId == 'fintech';
+  if (!business) return tab.sections;
+  switch (tab.id) {
+    case 'NUST-NET':
+      return _nustBusinessSections;
+    case 'FAST-NU':
+      return _fastBusinessSections;
+    default:
+      return tab.sections;
+  }
+}
+
 const _ntsSections = [
   QuizSection(
     emoji: '📐',
@@ -2045,7 +2122,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             duration: const Duration(milliseconds: 250),
             child: _buildQuizGrid(
               visibleTabs[safeIndex].label,
-              visibleTabs[safeIndex].sections,
+              sectionsForDegree(
+                visibleTabs[safeIndex],
+                ref.watch(targetDegreeProvider).valueOrNull,
+              ),
               sectionMap,
               key: ValueKey(safeIndex),
             ),

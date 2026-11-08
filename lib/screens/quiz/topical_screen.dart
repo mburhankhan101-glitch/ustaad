@@ -17,7 +17,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/providers/user_selection_provider.dart';
 import 'package:ustaad/screens/home/home_screen.dart'
-    show ExamTab, QuizSection, UstaadColors, visibleExamTabs;
+    show ExamTab, QuizSection, UstaadColors, sectionsForDegree, visibleExamTabs;
 import 'package:ustaad/screens/quiz/topic_practice_screen.dart';
 
 class TopicalScreen extends ConsumerStatefulWidget {
@@ -55,6 +55,7 @@ class _TopicalScreenState extends ConsumerState<TopicalScreen> {
   @override
   Widget build(BuildContext context) {
     final selected = ref.watch(selectedTestsProvider).valueOrNull ?? const [];
+    final degree = ref.watch(targetDegreeProvider).valueOrNull;
     final tabs = visibleExamTabs(selected);
     final index = _exam.clamp(0, tabs.length - 1);
     final tab = tabs[index];
@@ -164,7 +165,8 @@ class _TopicalScreenState extends ConsumerState<TopicalScreen> {
               const SizedBox(height: 18),
             ],
 
-            for (final s in tab.sections) _sectionRow(tab, s),
+            for (final s in sectionsForDegree(tab, degree))
+              _sectionRow(tab, s),
           ],
         ),
           ),
