@@ -102,6 +102,20 @@ const _degrees = [
     stream: _Stream.engineering,
   ),
   _DegreeOption(
+    id: 'architecture',
+    label: 'Architecture / Industrial Design',
+    subtitle: 'B.Arch, B.Industrial Design',
+    icon: Icons.architecture_rounded,
+    stream: _Stream.engineering,
+  ),
+  _DegreeOption(
+    id: 'applied_sciences',
+    label: 'Applied Sciences',
+    subtitle: 'BS Physics, Chemistry, Biosciences',
+    icon: Icons.science_rounded,
+    stream: _Stream.engineering,
+  ),
+  _DegreeOption(
     id: 'medical',
     label: 'MBBS / BDS (Medical)',
     subtitle: 'Doctor of Medicine, Dental Surgery',
@@ -174,6 +188,24 @@ final _tests = [
       'data_ai': [
         _Subject('Mathematics', 0.50),
         _Subject('Physics', 0.30),
+        _Subject('English', 0.20),
+      ],
+      'business': [
+        _Subject('Quantitative Mathematics', 0.50),
+        _Subject('English', 0.50),
+      ],
+      'fintech': [
+        _Subject('Quantitative Mathematics', 0.50),
+        _Subject('English', 0.50),
+      ],
+      'architecture': [
+        _Subject('Design Aptitude', 0.50),
+        _Subject('Mathematics', 0.30),
+        _Subject('English', 0.20),
+      ],
+      'applied_sciences': [
+        _Subject('Biology', 0.50),
+        _Subject('Chemistry', 0.30),
         _Subject('English', 0.20),
       ],
       'default': [

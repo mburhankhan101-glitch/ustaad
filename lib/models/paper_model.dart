@@ -351,6 +351,47 @@ class PaperConfigs {
   ///
   /// Both halves come from banks we already have. English is pulled from the
   /// NUST-NET key and Quantitative from the same, which is where they live.
+  /// FAST Business: 120 questions in 120 minutes, Basic Mathematics 60,
+  /// Analytical Reasoning 30, English 30.
+  ///
+  /// The published weighting also lists Essay Writing at 15%. It is written
+  /// rather than answered, so it has no place in an MCQ mock and is not here.
+  static const List<SectionConfig> fastBusiness = [
+    SectionConfig(
+      id: 'basicMaths',
+      label: 'Basic Mathematics',
+      firestoreExam: 'NTS',
+      firestoreSection: 'Quantitative',
+      totalQuestions: 60,
+      totalMinutes: 60,
+      markCorrect: 1.0,
+      markWrong: -0.25,
+      progressExam: 'FAST-NU',
+    ),
+    SectionConfig(
+      id: 'analytical',
+      label: 'Analytical Reasoning',
+      firestoreExam: 'NTS',
+      firestoreSection: 'Analytical',
+      totalQuestions: 30,
+      totalMinutes: 30,
+      markCorrect: 1.0,
+      markWrong: -0.25,
+      progressExam: 'FAST-NU',
+    ),
+    SectionConfig(
+      id: 'english',
+      label: 'English',
+      firestoreExam: 'FAST-NU',
+      firestoreSection: 'English',
+      totalQuestions: 30,
+      totalMinutes: 30,
+      markCorrect: 1.0,
+      markWrong: -0.25,
+      progressExam: 'FAST-NU',
+    ),
+  ];
+
   static const List<SectionConfig> nustBusiness = [
     SectionConfig(
       id: 'quantitative',
@@ -465,6 +506,46 @@ class PaperConfigs {
     ),
   ];
 
+  /// The one paper a student should be offered for a test, given the degree
+  /// they chose at sign-up.
+  ///
+  /// A test is not a paper. FAST sets a different paper for CS than for
+  /// Business, and NET sets four. Listing all of them and asking a student
+  /// to pick again is asking a question they already answered — and inviting
+  /// them to sit the wrong one. Null means we have no paper for that pairing.
+  static UserProgram? programFor(String testId, String? degreeId) {
+    switch (testId) {
+      case 'FAST-NU':
+        switch (degreeId) {
+          case 'business':
+          case 'fintech':
+            return UserProgram.fastBusiness;
+          default:
+            return UserProgram.fastCS;
+        }
+      case 'NUST-NET':
+        switch (degreeId) {
+          case 'business':
+          case 'fintech':
+            return UserProgram.nustBusiness;
+          case 'architecture':
+            return UserProgram.nustArchitecture;
+          case 'applied_sciences':
+            return UserProgram.nustAppliedSciences;
+          default:
+            return UserProgram.nustEngineering;
+        }
+      case 'NAT-NTS':
+        return UserProgram.ntsCS;
+      case 'MDCAT':
+        return UserProgram.mdcatMedical;
+      case 'NUMS':
+        return UserProgram.numsMedical;
+      default:
+        return null;
+    }
+  }
+
   /// The paper for a programme.
   ///
   /// NET carries four programmes behind one ExamType, so the exam alone no
@@ -478,6 +559,8 @@ class PaperConfigs {
         return nustAppliedSciences;
       case UserProgram.nustArchitecture:
         return nustArchitecture;
+      case UserProgram.fastBusiness:
+        return fastBusiness;
       default:
         return forExamType(type);
     }

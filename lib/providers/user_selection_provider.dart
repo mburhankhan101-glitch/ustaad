@@ -18,6 +18,7 @@
 // write this provider has no way to observe on its own).
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ustaad/providers/auth_provider.dart';
 
@@ -52,6 +53,25 @@ final selectedTestsProvider = FutureProvider<List<String>>((ref) async {
           ?.map((e) => e.toString())
           .toList() ??
       [];
+});
+
+/// The degree the student picked at sign-up, e.g. 'cs_se' or 'architecture'.
+///
+/// A test alone does not identify a paper: FAST sets a different paper for
+/// Business than for CS, and NET sets four. The degree is the other half of
+/// that answer, and the student already gave it, so Papers should not ask
+/// again.
+final targetDegreeProvider = StreamProvider<String?>((ref) {
+  final uid = ref.watch(authProvider).user?.uid;
+  if (uid == null) return Stream.value(null);
+  return FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((doc) => doc.data()?['targetDegree'] as String?)
+      .handleError((Object e) {
+        debugPrint('[targetDegree] snapshot failed: $e');
+      });
 });
 
 /// True if the user's selected tests include any medical exam.

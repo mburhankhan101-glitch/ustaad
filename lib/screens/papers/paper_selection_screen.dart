@@ -16,6 +16,7 @@ class PaperSelectionScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isWeb = MediaQuery.of(context).size.width > 600;
     final selectedTestsAsync = ref.watch(selectedTestsProvider);
+    final degree = ref.watch(targetDegreeProvider).valueOrNull;
 
     return Scaffold(
       // No backgroundColor needed – gradient covers everything
@@ -42,12 +43,9 @@ class PaperSelectionScreen extends ConsumerWidget {
           loading: () => const Center(
             child: CircularProgressIndicator(color: Colors.white54),
           ),
-          error: (_, __) => _buildContent(context, isWeb, isMedical: false),
-          data: (selectedTests) => _buildContent(
-            context,
-            isWeb,
-            isMedical: isMedicalSelection(selectedTests),
-          ),
+          error: (_, __) => _buildContent(context, isWeb, const [], null),
+          data: (selectedTests) =>
+              _buildContent(context, isWeb, selectedTests, degree),
         ),
       ),
     );
@@ -55,14 +53,15 @@ class PaperSelectionScreen extends ConsumerWidget {
 
   Widget _buildContent(
     BuildContext context,
-    bool isWeb, {
-    required bool isMedical,
-  }) {
+    bool isWeb,
+    List<String> selectedTests,
+    String? degree,
+  ) {
     return isWeb
         ? SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-            child: _buildWebContent(context, isMedical),
+            child: _buildWebContent(context, selectedTests, degree),
           )
         : SafeArea(
             child: SingleChildScrollView(
@@ -73,13 +72,21 @@ class PaperSelectionScreen extends ConsumerWidget {
               // it, so without this the last card gets clipped and the
               // scroll view stops short of fully revealing it.
               padding: const EdgeInsets.fromLTRB(18, 8, 18, 100),
-              child: _buildMobileContent(context, isMedical),
+              child: _buildMobileContent(
+                context,
+                selectedTests,
+                degree,
+              ),
             ),
           );
   }
 
   // ── Mobile layout ────────────────────────────────────────────────────
-  Widget _buildMobileContent(BuildContext context, bool isMedical) {
+  Widget _buildMobileContent(
+    BuildContext context,
+    List<String> selectedTests,
+    String? degree,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -106,35 +113,30 @@ class PaperSelectionScreen extends ConsumerWidget {
             ),
           ),
         ),
-        Column(
-          children: isMedical
-              ? [
-                  _buildPaperCard(context, mdcatPaperCard(context)),
-                  const SizedBox(height: 16),
-                  _buildPaperCard(context, numsPaperCard(context)),
-                  const SizedBox(height: 40),
-                ]
-              : [
-                  _buildPaperCard(context, fastPaperCard(context)),
-                  const SizedBox(height: 16),
-                  _buildPaperCard(context, nustPaperCard(context)),
-                  const SizedBox(height: 16),
-                  _buildPaperCard(context, nustBusinessPaperCard(context)),
-                  const SizedBox(height: 16),
-                  _buildPaperCard(context, nustAppliedPaperCard(context)),
-                  const SizedBox(height: 16),
-                  _buildPaperCard(context, nustArchPaperCard(context)),
-                  const SizedBox(height: 16),
-                  _buildPaperCard(context, ntsPaperCard(context)),
-                  const SizedBox(height: 40),
+        Builder(
+          builder: (context) {
+            final cards = _cardsFor(context, selectedTests, degree);
+            if (cards.isEmpty) return _noPapers();
+            return Column(
+              children: [
+                for (var i = 0; i < cards.length; i++) ...[
+                  _buildPaperCard(context, cards[i]),
+                  SizedBox(height: i == cards.length - 1 ? 40 : 16),
                 ],
+              ],
+            );
+          },
         ),
       ],
     );
   }
 
   // ── Web content ──────────────────────────────────────────────────────
-  Widget _buildWebContent(BuildContext context, bool isMedical) {
+  Widget _buildWebContent(
+    BuildContext context,
+    List<String> selectedTests,
+    String? degree,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -157,36 +159,100 @@ class PaperSelectionScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 32),
-        if (isMedical)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _buildPaperCard(context, mdcatPaperCard(context)),
-              ),
-              const SizedBox(width: 20),
-              Expanded(child: _buildPaperCard(context, numsPaperCard(context))),
-              const SizedBox(width: 20),
-              const Expanded(child: SizedBox()),
-            ],
-          )
-        else
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _buildPaperCard(context, fastPaperCard(context))),
-              const SizedBox(width: 20),
-              Expanded(child: _buildPaperCard(context, nustPaperCard(context))),
-              const SizedBox(width: 20),
-              Expanded(child: _buildPaperCard(context, ntsPaperCard(context))),
-            ],
-          ),
+        Builder(
+          builder: (context) {
+            final cards = _cardsFor(context, selectedTests, degree);
+            if (cards.isEmpty) return _noPapers();
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < cards.length; i++) ...[
+                  Expanded(child: _buildPaperCard(context, cards[i])),
+                  if (i != cards.length - 1) const SizedBox(width: 20),
+                ],
+              ],
+            );
+          },
+        ),
         const SizedBox(height: 40),
       ],
     );
   }
 
   // ── Factory methods for card data ─────────────────────────────────────
+  /// One card per test the student picked, resolved through their degree.
+  ///
+  /// Papers used to list every exam the app supports and ask the student to
+  /// choose again — including the three NET programmes they are not sitting.
+  /// They answered both halves of this at sign-up, so the only honest list is
+  /// the papers that belong to them.
+  List<_PaperCardData> _cardsFor(
+    BuildContext context,
+    List<String> selectedTests,
+    String? degree,
+  ) {
+    final out = <_PaperCardData>[];
+    final seen = <UserProgram>{};
+    for (final testId in selectedTests) {
+      final program = PaperConfigs.programFor(testId, degree);
+      if (program == null || !seen.add(program)) continue;
+      final card = _cardForProgram(context, program);
+      if (card != null) out.add(card);
+    }
+    return out;
+  }
+
+  _PaperCardData? _cardForProgram(BuildContext context, UserProgram program) {
+    switch (program) {
+      case UserProgram.fastCS:
+        return fastPaperCard(context);
+      case UserProgram.fastBusiness:
+        return fastBusinessPaperCard(context);
+      case UserProgram.nustEngineering:
+        return nustPaperCard(context);
+      case UserProgram.nustBusiness:
+        return nustBusinessPaperCard(context);
+      case UserProgram.nustAppliedSciences:
+        return nustAppliedPaperCard(context);
+      case UserProgram.nustArchitecture:
+        return nustArchPaperCard(context);
+      case UserProgram.ntsCS:
+        return ntsPaperCard(context);
+      case UserProgram.mdcatMedical:
+        return mdcatPaperCard(context);
+      case UserProgram.numsMedical:
+        return numsPaperCard(context);
+    }
+  }
+
+  /// Shown when the degree has not loaded or no paper matches. Says what to
+  /// do rather than leaving a gap where cards should be.
+  Widget _noPapers() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Column(
+          children: [
+            Text(
+              'No papers for your selection yet',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.85),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'Poppins',
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Check the test and degree on your profile.',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.5),
+                fontSize: 12.5,
+                fontFamily: 'Poppins',
+              ),
+            ),
+          ],
+        ),
+      );
+
   _PaperCardData fastPaperCard(BuildContext context) => _PaperCardData(
     title: 'FAST-NU Entrance',
     duration: '120 mins',
@@ -218,6 +284,24 @@ class PaperSelectionScreen extends ConsumerWidget {
         builder: (_) => const ProgramSelectionScreen(
           examType: ExamType.nustNET,
           userProgram: UserProgram.nustEngineering,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData fastBusinessPaperCard(BuildContext context) => _PaperCardData(
+    title: 'FAST-NU (Business)',
+    duration: '120 mins',
+    marks: '120 marks',
+    tags: const ['60 Basic Maths', '30 Analytical', '30 English'],
+    markingScheme: '+1   ·   −0.25 Negative Marking',
+    accentColor: const Color(0xFF6C63FF),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.fastNU,
+          userProgram: UserProgram.fastBusiness,
         ),
       ),
     ),
