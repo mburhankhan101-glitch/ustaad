@@ -326,6 +326,13 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
   String? _selectedDegreeId;
   bool _isSaving = false;
 
+  /// The degree picker expands in place; these drive it.
+  bool _degreeOpen = false;
+  String _degreeQuery = '';
+  final _degreeSearch = TextEditingController();
+  final _scroll = ScrollController();
+  final _pickerKey = GlobalKey();
+
 
 
 
@@ -346,6 +353,8 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
 
   @override
   void dispose() {
+    _degreeSearch.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -559,10 +568,17 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
   // ───────────────────────────────────────────────────────────────────────
 
   @override
+  @override
   Widget build(BuildContext context) {
     final degree = _selectedDegree;
+    final tests = degree == null ? const <_TestOption>[] : _testsIn(degree.stream);
 
     return Scaffold(
+      // Default, but stated: the whole page is one scroll view, so when the
+      // keyboard opens the viewport shrinks and the field can be scrolled
+      // above it. The old selector expanded inline over a fixed layout, and
+      // the keyboard simply sat on top of the search box.
+      resizeToAvoidBottomInset: true,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -577,8 +593,14 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
             children: [
               Expanded(
                 child: ListView(
+                  controller: _scroll,
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    20,
+                    24,
+                    24 + MediaQuery.of(context).viewInsets.bottom,
+                  ),
                   children: [
                     if (widget.isEditing)
                       Align(
@@ -604,16 +626,51 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
                         height: 1.25,
                       ),
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 26),
 
                     _heading('Degree'),
-                    for (final d in _degrees) _degreeRow(d),
+                    const SizedBox(height: 8),
+                    _degreePicker(),
 
-                    if (degree != null) ...[
-                      const SizedBox(height: 28),
-                      _heading('Tests'),
-                      for (final t in _testsIn(degree.stream)) _testRow(t),
-                    ],
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: degree == null
+                          ? const SizedBox(width: double.infinity)
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 28),
+                                Row(
+                                  children: [
+                                    _heading('Tests'),
+                                    const Spacer(),
+                                    // A count rather than a congratulation:
+                                    // the one thing worth saying here is how
+                                    // many are ticked.
+                                    AnimatedOpacity(
+                                      duration:
+                                          const Duration(milliseconds: 180),
+                                      opacity:
+                                          _selectedTestIds.isEmpty ? 0 : 1,
+                                      child: Text(
+                                        '${_selectedTestIds.length} selected',
+                                        style: TextStyle(
+                                          fontFamily: 'Poppins',
+                                          color: Colors.white.withOpacity(0.5),
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                for (final t in tests) _testRow(t),
+                              ],
+                            ),
+                    ),
                   ],
                 ),
               ),
@@ -625,16 +682,170 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
     );
   }
 
-  Widget _heading(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Text(
-          text,
-          style: TextStyle(
-            fontFamily: 'Poppins',
-            color: Colors.white.withOpacity(0.5),
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
+  // ── The degree picker ────────────────────────────────────────────────────
+  //
+  // Expands in place rather than opening a sheet, which is how it read best.
+  // The keyboard problem it used to have was not the pattern's fault: the
+  // panel sat in a fixed layout, so the search field could end up behind the
+  // keyboard with no way to scroll it up. Now the page is one scroll view and
+  // the picker is scrolled to the top of the viewport as it opens, so the
+  // field lands well clear of the keyboard and the list scrolls underneath.
+
+  Widget _degreePicker() {
+    final chosen = _selectedDegree;
+    return Column(
+      key: _pickerKey,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: _toggleDegreePicker,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              children: [
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Column(
+                      key: ValueKey(chosen?.id ?? 'none'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          chosen?.label ?? 'Choose your degree',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            color: Colors.white
+                                .withOpacity(chosen == null ? 0.6 : 1),
+                            fontSize: 16,
+                            fontWeight: chosen == null
+                                ? FontWeight.w500
+                                : FontWeight.w700,
+                          ),
+                        ),
+                        if (chosen != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            chosen.subtitle,
+                            style: TextStyle(
+                              fontFamily: 'Poppins',
+                              color: Colors.white.withOpacity(0.45),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: _degreeOpen ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 220),
+                  child: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white.withOpacity(0.6),
+                    size: 24,
+                  ),
+                ),
+              ],
+            ),
           ),
+        ),
+        Container(height: 1, color: Colors.white.withOpacity(0.12)),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: _degreeOpen
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _degreeSearch,
+                      autofocus: true,
+                      onChanged: (v) => setState(() => _degreeQuery = v.trim()),
+                      style: const TextStyle(
+                        fontFamily: 'Poppins',
+                        color: Colors.white,
+                        fontSize: 14,
+                      ),
+                      cursorColor: Colors.white,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Search degrees',
+                        hintStyle: TextStyle(
+                          fontFamily: 'Poppins',
+                          color: Colors.white.withOpacity(0.35),
+                          fontSize: 13.5,
+                        ),
+                        prefixIcon: Icon(Icons.search,
+                            color: Colors.white.withOpacity(0.4), size: 19),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.07),
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    for (final d in _matchingDegrees) _degreeRow(d),
+                  ],
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
+  }
+
+  List<_DegreeOption> get _matchingDegrees {
+    if (_degreeQuery.isEmpty) return _degrees;
+    final q = _degreeQuery.toLowerCase();
+    return _degrees
+        .where((d) =>
+            d.label.toLowerCase().contains(q) ||
+            d.subtitle.toLowerCase().contains(q))
+        .toList();
+  }
+
+  void _toggleDegreePicker() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _degreeOpen = !_degreeOpen;
+      if (!_degreeOpen) {
+        _degreeQuery = '';
+        _degreeSearch.clear();
+        FocusScope.of(context).unfocus();
+      }
+    });
+    if (_degreeOpen) {
+      // After the frame so the expanded panel has a size, and after the
+      // keyboard has had a moment to come up, so the scroll lands on the
+      // final viewport rather than the pre-keyboard one.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future<void>.delayed(const Duration(milliseconds: 220), () {
+          final ctx = _pickerKey.currentContext;
+          if (ctx == null || !mounted) return;
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: 0,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+          );
+        });
+      });
+    }
+  }
+
+  Widget _heading(String text) => Text(
+        text,
+        style: TextStyle(
+          fontFamily: 'Poppins',
+          color: Colors.white.withOpacity(0.5),
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
         ),
       );
 
@@ -642,7 +853,15 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
     final on = _selectedDegreeId == d.id;
     return _row(
       selected: on,
-      onTap: () => _selectDegree(d.id),
+      onTap: () {
+        _selectDegree(d.id);
+        setState(() {
+          _degreeOpen = false;
+          _degreeQuery = '';
+          _degreeSearch.clear();
+        });
+        FocusScope.of(context).unfocus();
+      },
       title: d.label,
       subtitle: d.subtitle,
     );
@@ -651,8 +870,8 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
   Widget _testRow(_TestOption t) {
     final on = _selectedTestIds.contains(t.id);
     final subjects = t.subjectsFor(_selectedDegreeId);
-    // "Maths 50 · Physics 30 · English 20" — the split, in the order the
-    // paper weights it, without a pill or a bar chart in sight.
+    // "Mathematics 50 · Physics 30 · English 20" — the split, in the order
+    // the paper weights it, without a pill or a bar chart in sight.
     final weights = subjects
         .map((s) => '${s.name} ${(s.weightage * 100).round()}')
         .join('  ·  ');
@@ -664,8 +883,9 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
     );
   }
 
-  /// One row, used for both lists. A tick on the right and brighter text is
-  /// the whole selected state — no border, no fill, no card.
+  /// One row, used for both lists. A tick and brighter text is the whole
+  /// selected state — no border, no card, and the faintest tint so the eye
+  /// can find what is chosen without the row becoming an object.
   Widget _row({
     required bool selected,
     required VoidCallback onTap,
@@ -677,12 +897,15 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
         HapticFeedback.selectionClick();
         onTap();
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 15),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        margin: const EdgeInsets.only(bottom: 2),
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
-          ),
+          color: selected
+              ? Colors.white.withOpacity(0.07)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
           children: [
@@ -715,12 +938,17 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
               ),
             ),
             const SizedBox(width: 14),
-            Icon(
-              selected ? Icons.check_circle : Icons.circle_outlined,
-              size: 21,
-              color: selected
-                  ? Colors.white
-                  : Colors.white.withOpacity(0.25),
+            AnimatedScale(
+              scale: selected ? 1 : 0.85,
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutBack,
+              child: Icon(
+                selected ? Icons.check_circle : Icons.circle_outlined,
+                size: 21,
+                color: selected
+                    ? Colors.white
+                    : Colors.white.withOpacity(0.25),
+              ),
             ),
           ],
         ),
