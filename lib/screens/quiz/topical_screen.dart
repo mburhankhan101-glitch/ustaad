@@ -56,7 +56,7 @@ class _TopicalScreenState extends ConsumerState<TopicalScreen> {
   Widget build(BuildContext context) {
     final selected = ref.watch(selectedTestsProvider).valueOrNull ?? const [];
     final degree = ref.watch(targetDegreeProvider).valueOrNull;
-    final tabs = visibleExamTabs(selected);
+    final tabs = visibleExamTabs(selected, degree);
     final index = _exam.clamp(0, tabs.length - 1);
     final tab = tabs[index];
 

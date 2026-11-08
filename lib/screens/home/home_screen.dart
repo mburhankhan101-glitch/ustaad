@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:ustaad/models/paper_model.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/svg.dart';
@@ -320,10 +321,16 @@ const kExamTabs = [
 /// The exams this student picked, or all of them if the selection is missing.
 /// Shared with TopicalScreen so there is one list of exams and sections, not
 /// two that can drift apart.
-List<ExamTab> visibleExamTabs(List<String> selectedTests) {
-  if (selectedTests.isEmpty) return kExamTabs;
-  final matched = kExamTabs.where((t) => selectedTests.contains(t.id)).toList();
-  return matched.isEmpty ? kExamTabs : matched;
+List<ExamTab> visibleExamTabs(List<String> selectedTests, [String? degreeId]) {
+  // A degree that cannot sit a test should not see its tab, even if an older
+  // account has it saved from before that rule existed.
+  final sittable = kExamTabs
+      .where((t) => testAllowsDegree(t.id, degreeId))
+      .toList();
+  if (selectedTests.isEmpty) return sittable;
+  final matched =
+      sittable.where((t) => selectedTests.contains(t.id)).toList();
+  return matched.isEmpty ? sittable : matched;
 }
 
 class _NavItem {
@@ -2048,8 +2055,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Falls back to every tab when the filter leaves nothing, which happens
   /// if selectedTests names an exam we no longer ship. Showing all of them
   /// is wrong but harmless; an empty list makes clamp(0, -1) throw.
-  List<ExamTab> _visibleTabs(List<String> selectedTests) =>
-      visibleExamTabs(selectedTests);
+  List<ExamTab> _visibleTabs(List<String> selectedTests) => visibleExamTabs(
+        selectedTests,
+        ref.read(targetDegreeProvider).valueOrNull,
+      );
 
   Widget _buildQuizSection(
     Map<String, dynamic> sectionMap,

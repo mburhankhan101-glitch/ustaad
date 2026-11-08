@@ -2,6 +2,28 @@
 
 enum ExamType { fastNU, nustNET, nts, mdcat, numsMdcat }
 
+/// Tests that only some degrees can sit.
+///
+/// The NAT is several different papers. The one this app holds is NAT-ICS/CS,
+/// so a Business or Architecture candidate cannot sit it — they need NAT-IM or
+/// NAT-IE, which have their own subjects and which we do not have yet.
+///
+/// Kept here rather than on the selection screen because four places need the
+/// answer: the screen that offers tests, the exam tabs on Home, Topical, and
+/// Papers. A second copy would eventually disagree with this one, and a
+/// student would be offered a paper they cannot sit.
+const Map<String, Set<String>> kTestDegreeLimits = {
+  'NAT-NTS': {'cs_se', 'data_ai'},
+};
+
+/// Whether [degreeId] may sit [testId]. Unknown degree means yes: a student
+/// whose degree has not loaded should see their tests, not an empty screen.
+bool testAllowsDegree(String testId, String? degreeId) {
+  final allowed = kTestDegreeLimits[testId];
+  if (allowed == null || degreeId == null) return true;
+  return allowed.contains(degreeId);
+}
+
 /// Which paper a student is sitting.
 ///
 /// Lives here rather than on the selection screen because NET now carries
@@ -536,7 +558,10 @@ class PaperConfigs {
             return UserProgram.nustEngineering;
         }
       case 'NAT-NTS':
-        return UserProgram.ntsCS;
+        // A degree that cannot sit this NAT gets no paper rather than the
+        // CS one. Reachable by an older account that picked NTS before the
+        // rule existed and has not edited since.
+        return testAllowsDegree(testId, degreeId) ? UserProgram.ntsCS : null;
       case 'MDCAT':
         return UserProgram.mdcatMedical;
       case 'NUMS':

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:ustaad/models/paper_model.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:ustaad/core/analytics/analytics_service.dart';
@@ -40,6 +41,7 @@ class _TestOption {
   final IconData icon;
   final Color accentColor;
   final _Stream stream;
+
   final Map<String, List<_Subject>> weightages;
 
   const _TestOption({
@@ -52,6 +54,10 @@ class _TestOption {
     required this.stream,
     required this.weightages,
   });
+
+  /// Defers to kTestDegreeLimits so this screen and the rest of the app
+  /// cannot disagree about who may sit what.
+  bool allowsDegree(String degreeId) => testAllowsDegree(id, degreeId);
 
   List<_Subject> subjectsFor(String? degreeId) =>
       weightages[degreeId] ?? weightages['default'] ?? [];
@@ -219,7 +225,7 @@ final _tests = [
   _TestOption(
     id: 'NAT-NTS',
     shortName: 'NAT-NTS',
-    fullName: 'National Aptitude Test — NTS',
+    fullName: 'National Aptitude Test — NTS (ICS/CS)',
     description: 'General admissions test across Pakistan',
     icon: Icons.school_rounded,
     accentColor: const Color(0xFFFFD700),
@@ -373,20 +379,28 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
     setState(() {
       _selectedDegreeId = id;
 
-      // Switching stream invalidates anything ticked in the other one. Without
-      // this, picking NET first and then a medical degree would leave NET
-      // quietly selected and saved against an MBBS profile.
-      final stream = _degrees.firstWhere((d) => d.id == id).stream;
-      _selectedTestIds.removeWhere(
-        (testId) => _tests.firstWhere((t) => t.id == testId).stream != stream,
-      );
+      // Switching degree invalidates anything the new one cannot sit, by
+      // stream or by the test's own rule. Without this, ticking NAT as a CS
+      // candidate and then switching to Business would leave the CS paper
+      // quietly selected and saved against a Business profile.
+      final picked = _degrees.firstWhere((d) => d.id == id);
+      _selectedTestIds.removeWhere((testId) {
+        final test = _tests.firstWhere((t) => t.id == testId);
+        return test.stream != picked.stream || !test.allowsDegree(picked.id);
+      });
     });
   }
 
   /// Sections are derived from the data rather than listed by hand, so a
   /// test added to the list appears without anyone remembering to render it.
-  List<_TestOption> _testsIn(_Stream stream) =>
-      _tests.where((t) => t.stream == stream).toList();
+  /// The tests a degree can actually sit.
+  ///
+  /// Stream alone was too coarse: it let a Business candidate tick the
+  /// CS-specific NAT, which they cannot sit and whose subjects are not
+  /// theirs.
+  List<_TestOption> _testsFor(_DegreeOption degree) => _tests
+      .where((t) => t.stream == degree.stream && t.allowsDegree(degree.id))
+      .toList();
 
   Future<void> _continue() async {
     if (!_canContinue || _isSaving) return;
@@ -571,7 +585,8 @@ class _TestSelectionScreenState extends State<TestSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     final degree = _selectedDegree;
-    final tests = degree == null ? const <_TestOption>[] : _testsIn(degree.stream);
+    final tests =
+        degree == null ? const <_TestOption>[] : _testsFor(degree);
 
     return Scaffold(
       // Default, but stated: the whole page is one scroll view, so when the
