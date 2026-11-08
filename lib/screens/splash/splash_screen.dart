@@ -12,6 +12,37 @@ import 'package:ustaad/screens/home/home_screen.dart';
 import 'package:ustaad/screens/onboarding/onboarding_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
+  /// Whether to wait for Firebase to finish restoring before deciding.
+  ///
+  /// Only when there is no user yet *and* there was one last time. A student
+  /// who was signed out never waits; one who was signed in is worth the
+  /// pause, because the alternative is showing them a login screen they do
+  /// not need.
+  @visibleForTesting
+  static bool shouldWaitForRestore({
+    required bool hasCurrentUser,
+    required bool hadSession,
+  }) =>
+      !hasCurrentUser && hadSession;
+
+  /// What to store in the session hint afterwards, or null to leave it alone.
+  ///
+  /// The subtle case is the third one. If we expected a session and still did
+  /// not get a user, that is a restore that was too slow — not proof the
+  /// student is signed out. Writing false there would erase the only reason
+  /// the next launch would wait, turning one slow start into a login screen
+  /// every time. So the hint is left as it is and the next launch tries
+  /// again.
+  @visibleForTesting
+  static bool? hintAfterResolve({
+    required bool hadSession,
+    required bool resolvedUser,
+  }) {
+    if (resolvedUser) return true;
+    if (!hadSession) return false;
+    return null;
+  }
+
   const SplashScreen({super.key});
 
   @override
@@ -124,7 +155,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     User? user;
     try {
       user = FirebaseAuth.instance.currentUser;
-      if (user == null && hadSession) {
+      if (SplashScreen.shouldWaitForRestore(
+        hasCurrentUser: user != null,
+        hadSession: hadSession,
+      )) {
         user = await FirebaseAuth.instance
             .authStateChanges()
             .firstWhere((u) => u != null)
@@ -141,11 +175,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       }
     }
 
-    // Keep the flag honest both ways, so only a student with a session to
-    // restore ever pays for the wait above.
-    try {
-      await prefs.setBool(kHadSessionKey, user != null);
-    } catch (_) {}
+    final hint = SplashScreen.hintAfterResolve(
+      hadSession: hadSession,
+      resolvedUser: user != null,
+    );
+    if (hint != null) {
+      try {
+        await prefs.setBool(kHadSessionKey, hint);
+      } catch (_) {}
+    }
 
     if (user != null) {
       if (user.emailVerified) {
