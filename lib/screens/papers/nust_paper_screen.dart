@@ -8,7 +8,12 @@ import 'paper_result_screen.dart';
 
 class NustPaperScreen extends ConsumerStatefulWidget {
   final ExamType examType;
-  const NustPaperScreen({super.key, required this.examType});
+  final UserProgram? userProgram;
+  const NustPaperScreen({
+    super.key,
+    required this.examType,
+    this.userProgram,
+  });
 
   @override
   ConsumerState<NustPaperScreen> createState() => _NustPaperScreenState();
@@ -24,6 +29,7 @@ class _NustPaperScreenState extends ConsumerState<NustPaperScreen> {
           .startPaper(
             widget.examType,
             uid: FirebaseAuth.instance.currentUser?.uid ?? '',
+            program: widget.userProgram,
           );
     });
   }

@@ -91,11 +91,18 @@ class PaperSessionNotifier
 
   // ── Start a paper ─────────────────────────────────────────────────────────
 
-  Future<void> startPaper(ExamType examType, {required String uid}) async {
+  /// [program] picks the paper where one exam has several. NET carries
+  /// four, so passing only the exam type would always build the engineering
+  /// paper. Null falls back to the exam's single programme.
+  Future<void> startPaper(
+    ExamType examType, {
+    required String uid,
+    UserProgram? program,
+  }) async {
     state = const AsyncValue.loading();
 
     try {
-      final configs = PaperConfigs.forExamType(examType);
+      final configs = PaperConfigs.forProgram(program, examType);
       final sessionExcludeIds = <String>{};
       final loadedSections = <LoadedSection>[];
 

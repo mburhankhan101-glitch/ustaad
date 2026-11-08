@@ -19,15 +19,7 @@ import 'package:ustaad/screens/papers/nust_paper_screen.dart';
 import 'package:ustaad/screens/papers/medical_paper_screen.dart';
 
 // ─── What the user picked on TestSelectionScreen ──────────────────────────────
-enum UserProgram {
-  fastCS,
-  fastBusiness,
-  nustEngineering,
-  nustBusiness,
-  ntsCS,
-  mdcatMedical,
-  numsMedical,
-}
+
 
 class ProgramSelectionScreen extends ConsumerWidget {
   final ExamType examType;
@@ -162,6 +154,44 @@ class ProgramSelectionScreen extends ConsumerWidget {
           totalMCQs: 200,
           totalTime: '180 min',
           totalMarks: '200',
+          hasNegative: false,
+        );
+
+      case UserProgram.nustAppliedSciences:
+        return _ProgramInfo(
+          label: 'Applied Sciences',
+          subtitle: 'National University of Sciences & Technology',
+          sections: const [
+            _SectionTag('100 Biology'),
+            _SectionTag('60 Chemistry'),
+            _SectionTag('40 English'),
+          ],
+          markingLines: const [
+            '+1 for every correct answer',
+            'No negative marking',
+          ],
+          totalMCQs: 200,
+          totalTime: '180 min',
+          totalMarks: '200',
+          hasNegative: false,
+        );
+
+      case UserProgram.nustArchitecture:
+        return _ProgramInfo(
+          label: 'Architecture / Industrial Design',
+          subtitle: 'Mathematics and English only — see below',
+          sections: const [
+            _SectionTag('60 Mathematics'),
+            _SectionTag('40 English'),
+          ],
+          markingLines: const [
+            '+1 for every correct answer  ·  No negative marking',
+            'Design Aptitude (50% of the real paper) is drawn by hand and '
+                'is not covered here.',
+          ],
+          totalMCQs: 100,
+          totalTime: '90 min',
+          totalMarks: '100',
           hasNegative: false,
         );
 
@@ -697,7 +727,10 @@ class ProgramSelectionScreen extends ConsumerWidget {
         screen = FastPaperScreen(examType: examType);
         break;
       case ExamType.nustNET:
-        screen = NustPaperScreen(examType: examType);
+        screen = NustPaperScreen(
+          examType: examType,
+          userProgram: userProgram,
+        );
         break;
       case ExamType.nts:
         screen = NtsPaperScreen(examType: examType);

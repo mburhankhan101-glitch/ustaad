@@ -2,6 +2,23 @@
 
 enum ExamType { fastNU, nustNET, nts, mdcat, numsMdcat }
 
+/// Which paper a student is sitting.
+///
+/// Lives here rather than on the selection screen because NET now carries
+/// four programmes behind one ExamType, so the configs have to switch on it
+/// and a model cannot import a screen.
+enum UserProgram {
+  fastCS,
+  fastBusiness,
+  nustEngineering,
+  nustBusiness,
+  nustArchitecture,
+  nustAppliedSciences,
+  ntsCS,
+  mdcatMedical,
+  numsMedical,
+}
+
 // ─── Sub‑source for composite sections ───────────────────────────────────────
 
 class SectionSource {
@@ -329,6 +346,142 @@ class PaperConfigs {
       ],
     ),
   ];
+
+  /// NET Business: Quantitative Mathematics 100, English 100, 200 marks.
+  ///
+  /// Both halves come from banks we already have. English is pulled from the
+  /// NUST-NET key and Quantitative from the same, which is where they live.
+  static const List<SectionConfig> nustBusiness = [
+    SectionConfig(
+      id: 'quantitative',
+      label: 'Quantitative Mathematics',
+      firestoreExam: 'NUST-NET',
+      firestoreSection: 'Quantitative',
+      totalQuestions: 100,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+    ),
+    SectionConfig(
+      id: 'english',
+      label: 'English',
+      firestoreExam: 'NUST-NET',
+      firestoreSection: 'English',
+      totalQuestions: 100,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+    ),
+  ];
+
+  /// NET Applied Sciences: Biology 100, Chemistry 60, English 40, in 180
+  /// minutes with no negative marking.
+  ///
+  /// Biology and Chemistry are stored under the MDCAT key — the same
+  /// intermediate syllabus serves both exams, and duplicating 737 questions
+  /// under a second key to make the config read tidily would be a worse
+  /// trade than this comment.
+  static const List<SectionConfig> nustAppliedSciences = [
+    SectionConfig(
+      id: 'biology',
+      label: 'Biology',
+      firestoreExam: 'MDCAT',
+      firestoreSection: 'Biology',
+      totalQuestions: 100,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+    ),
+    SectionConfig(
+      id: 'chemistry',
+      label: 'Chemistry',
+      firestoreExam: 'MDCAT',
+      firestoreSection: 'Chemistry',
+      totalQuestions: 60,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+    ),
+    SectionConfig(
+      id: 'english',
+      label: 'English',
+      firestoreExam: 'NUST-NET',
+      firestoreSection: 'English',
+      totalQuestions: 40,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+    ),
+  ];
+
+  /// NET Architecture, minus the half of it that cannot be sat on a phone.
+  ///
+  /// The real paper is Design Aptitude 50%, Mathematics 30%, English 20%.
+  /// Design Aptitude is drawing: straight unbroken lines, line weight, object
+  /// and scenery drawing, two-point perspective, 2D to 3D. None of that is a
+  /// multiple-choice question, and the bank holds nothing for it.
+  ///
+  /// So this covers Mathematics and English and says so on the card rather
+  /// than quietly presenting half a paper as a whole one. A student who
+  /// practises only this and expects to be ready has been misled by us, which
+  /// is worse than not offering it.
+  static const List<SectionConfig> nustArchitecture = [
+    SectionConfig(
+      id: 'maths',
+      label: 'Mathematics',
+      totalQuestions: 60,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+      subSections: const [
+        SectionSource(
+          firestoreExam: 'NUST-NET',
+          firestoreSection: 'Advanced Maths',
+          count: 40,
+        ),
+        SectionSource(
+          firestoreExam: 'NUST-NET',
+          firestoreSection: 'Quantitative',
+          count: 20,
+        ),
+      ],
+    ),
+    SectionConfig(
+      id: 'english',
+      label: 'English',
+      firestoreExam: 'NUST-NET',
+      firestoreSection: 'English',
+      totalQuestions: 40,
+      totalMinutes: 0,
+      markCorrect: 1.0,
+      markWrong: 0.0,
+      progressExam: 'NUST-NET',
+    ),
+  ];
+
+  /// The paper for a programme.
+  ///
+  /// NET carries four programmes behind one ExamType, so the exam alone no
+  /// longer identifies the paper. Everything else has exactly one programme
+  /// and falls through to [forExamType].
+  static List<SectionConfig> forProgram(UserProgram? program, ExamType type) {
+    switch (program) {
+      case UserProgram.nustBusiness:
+        return nustBusiness;
+      case UserProgram.nustAppliedSciences:
+        return nustAppliedSciences;
+      case UserProgram.nustArchitecture:
+        return nustArchitecture;
+      default:
+        return forExamType(type);
+    }
+  }
 
   static List<SectionConfig> forExamType(ExamType type) {
     switch (type) {

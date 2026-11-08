@@ -119,6 +119,12 @@ class PaperSelectionScreen extends ConsumerWidget {
                   const SizedBox(height: 16),
                   _buildPaperCard(context, nustPaperCard(context)),
                   const SizedBox(height: 16),
+                  _buildPaperCard(context, nustBusinessPaperCard(context)),
+                  const SizedBox(height: 16),
+                  _buildPaperCard(context, nustAppliedPaperCard(context)),
+                  const SizedBox(height: 16),
+                  _buildPaperCard(context, nustArchPaperCard(context)),
+                  const SizedBox(height: 16),
                   _buildPaperCard(context, ntsPaperCard(context)),
                   const SizedBox(height: 40),
                 ],
@@ -212,6 +218,63 @@ class PaperSelectionScreen extends ConsumerWidget {
         builder: (_) => const ProgramSelectionScreen(
           examType: ExamType.nustNET,
           userProgram: UserProgram.nustEngineering,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData nustBusinessPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NUST NET (Business)',
+    duration: '180 mins',
+    marks: '200 marks',
+    tags: const ['100 Quantitative', '100 English'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF4CAF50),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.nustNET,
+          userProgram: UserProgram.nustBusiness,
+        ),
+      ),
+    ),
+  );
+
+  _PaperCardData nustAppliedPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NUST NET (Applied Sciences)',
+    duration: '180 mins',
+    marks: '200 marks',
+    tags: const ['100 Biology', '60 Chemistry', '40 English'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF4CAF50),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.nustNET,
+          userProgram: UserProgram.nustAppliedSciences,
+        ),
+      ),
+    ),
+  );
+
+  /// Maths and English only. Design Aptitude is half the real paper and is
+  /// drawn by hand, so the card says so rather than letting a student think
+  /// one of these is a full rehearsal.
+  _PaperCardData nustArchPaperCard(BuildContext context) => _PaperCardData(
+    title: 'NUST NET (Architecture)',
+    duration: '90 mins',
+    marks: '100 marks',
+    tags: const ['60 Mathematics', '40 English', 'No Design Aptitude'],
+    markingScheme: '+1   ·   No Negative Marking',
+    accentColor: const Color(0xFF4CAF50),
+    onTap: () => Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const ProgramSelectionScreen(
+          examType: ExamType.nustNET,
+          userProgram: UserProgram.nustArchitecture,
         ),
       ),
     ),
